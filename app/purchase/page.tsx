@@ -1,4 +1,3 @@
-// app/purchase/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -7,7 +6,7 @@ import { storage, STORAGE_KEYS } from '@/lib/storage';
 import type { PurchaseItem, ItemType } from '@/lib/types';
 import { format } from 'date-fns';
 
-const ITEM_TYPES: (ItemType | 'OTHER')[] = ['BN', 'SN', 'C', 'BNS', 'SNS', 'CS', 'ABN', 'ASN', 'OTHER'];
+const ITEM_TYPES: (ItemType | 'OTHER')[] = ['SN', 'BN', 'C', 'BNS', 'SNS', 'CS', 'ABN', 'ASN', 'OTHER'];
 
 interface PurchaseLineItem {
   id: string;
@@ -27,9 +26,13 @@ export default function PurchasePage() {
     supplier: '',
   });
 
-  const [lineItems, setLineItems] = useState<PurchaseLineItem[]>([
-    { id: '1', itemType: 'BN', customItemName: '', quantity: '', pricePerUnit: '' }
-  ]);
+  const getInitialLineItems = (): PurchaseLineItem[] => [
+    { id: '1', itemType: 'SN', customItemName: '', quantity: '', pricePerUnit: '' },
+    { id: '2', itemType: 'BN', customItemName: '', quantity: '', pricePerUnit: '' },
+    { id: '3', itemType: 'C', customItemName: '', quantity: '', pricePerUnit: '' },
+  ];
+
+  const [lineItems, setLineItems] = useState<PurchaseLineItem[]>(getInitialLineItems());
 
   useEffect(() => {
     loadPurchases();
@@ -47,15 +50,19 @@ export default function PurchasePage() {
   };
 
   const generateBatchNumber = () => {
-    const date = new Date();
-    const timestamp = date.getTime();
-    return `BATCH-${timestamp}`;
+    const existingBatches = storage.get<PurchaseItem[]>(STORAGE_KEYS.PURCHASES) || [];
+    const nextNumber = existingBatches.length + 1;
+    return nextNumber.toString().padStart(3, '0');
+  };
+
+  const roundToNearest10 = (value: number) => {
+    return Math.ceil(value)
   };
 
   const addLineItem = () => {
     setLineItems([...lineItems, { 
       id: Date.now().toString(), 
-      itemType: 'BN', 
+      itemType: 'OTHER', 
       customItemName: '', 
       quantity: '', 
       pricePerUnit: '' 
@@ -69,16 +76,40 @@ export default function PurchasePage() {
   };
 
   const updateLineItem = (id: string, field: keyof PurchaseLineItem, value: string) => {
-    setLineItems(lineItems.map(item => 
-      item.id === id ? { ...item, [field]: value } : item
-    ));
+    setLineItems(prev =>
+      prev.map(item => {
+        let updatedItem = { ...item };
+
+        if (item.id === id) {
+          updatedItem[field] = value;
+        }
+
+        // Auto-calculate BN and C prices from SN with rounding to nearest 10
+        const snLine = prev.find(li => li.itemType === 'SN');
+        const snRate = snLine ? parseFloat(snLine.pricePerUnit) || 0 : 0;
+
+        if (snRate > 0) {
+          if (item.itemType === 'BN') {
+            const calculatedPrice = (snRate / 11.8) * 15;
+            updatedItem.pricePerUnit = roundToNearest10(calculatedPrice).toString();
+          }
+          if (item.itemType === 'C') {
+            const calculatedPrice = (snRate / 11.8) * 45.4;
+            updatedItem.pricePerUnit = roundToNearest10(calculatedPrice).toString();
+          }
+        }
+
+        return updatedItem;
+      })
+    );
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     const newPurchases: PurchaseItem[] = [];
     const updatedCustomItems = [...customItems];
+    const batchNumber = generateBatchNumber();
 
     lineItems.forEach(line => {
       if (!line.quantity || !line.pricePerUnit) return;
@@ -92,13 +123,12 @@ export default function PurchasePage() {
         pricePerUnit: parseFloat(line.pricePerUnit),
         totalCost: parseFloat(line.quantity) * parseFloat(line.pricePerUnit),
         supplier: formData.supplier,
-        batchNumber: generateBatchNumber(),
-        remainingQuantity: parseFloat(line.quantity)
+        batchNumber: batchNumber,
+        remainingQuantity: parseFloat(line.quantity),
       };
 
       newPurchases.push(newPurchase);
 
-      // Save custom item
       if (line.itemType === 'OTHER' && line.customItemName && !updatedCustomItems.includes(line.customItemName)) {
         updatedCustomItems.push(line.customItemName);
       }
@@ -107,16 +137,19 @@ export default function PurchasePage() {
     const allPurchases = [...newPurchases, ...purchases];
     storage.set(STORAGE_KEYS.PURCHASES, allPurchases);
     storage.set(STORAGE_KEYS.CUSTOM_ITEMS, updatedCustomItems);
-    
+
     setPurchases(allPurchases);
     setCustomItems(updatedCustomItems);
 
     // Reset form
-    setFormData({
-      date: format(new Date(), 'yyyy-MM-dd'),
-      supplier: '',
-    });
-    setLineItems([{ id: '1', itemType: 'BN', customItemName: '', quantity: '', pricePerUnit: '' }]);
+    setFormData({ date: format(new Date(), 'yyyy-MM-dd'), supplier: '' });
+    setLineItems(getInitialLineItems());
+    setShowModal(false);
+  };
+
+  const handleCancel = () => {
+    setFormData({ date: format(new Date(), 'yyyy-MM-dd'), supplier: '' });
+    setLineItems(getInitialLineItems());
     setShowModal(false);
   };
 
@@ -128,261 +161,309 @@ export default function PurchasePage() {
     }
   };
 
+  const getTotalAmount = () => lineItems.reduce((sum, item) => {
+    const qty = parseFloat(item.quantity) || 0;
+    const price = parseFloat(item.pricePerUnit) || 0;
+    return sum + qty * price;
+  }, 0);
+
   const totalPurchaseValue = purchases.reduce((sum, p) => sum + p.totalCost, 0);
-  const getTotalAmount = () => {
-    return lineItems.reduce((sum, item) => {
-      const qty = parseFloat(item.quantity) || 0;
-      const price = parseFloat(item.pricePerUnit) || 0;
-      return sum + (qty * price);
-    }, 0);
-  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Purchase Management</h1>
-        <div className="flex items-center space-x-4">
-          <div className="text-right">
-            <p className="text-sm text-gray-600">Total Purchases</p>
-            <p className="text-2xl font-bold text-blue-600">
-              Rs {totalPurchaseValue.toLocaleString('en-PK')}
-            </p>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-8">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-4xl font-bold text-gray-900 mb-2">Purchase Management</h1>
           </div>
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center space-x-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-          >
-            <Plus className="w-5 h-5" />
-            <span>Add Purchase</span>
-          </button>
-        </div>
-      </div>
+          
+         <div className="flex items-end gap-4">
+  <div className="flex flex-col items-center min-w-[250px]">
+    <p className="text-bg text-gray-1000 font-semibold mb-1">Total Purchases</p>
+    <div className="bg-white shadow-lg rounded-xl px-6 py-4 border border-gray-200 h-[60px] flex items-center justify-center w-full">
+      <p className="text-2xl font-bold text-blue-600">Rs {totalPurchaseValue.toLocaleString('en-PK')}</p>
+    </div>
+  </div>
+  
+  <button
+    onClick={() => setShowModal(true)}
+    className="flex items-center gap-2 px-6 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-200 h-[60px] min-w-[180px] justify-center"
+  >
+    <Plus className="w-5 h-5" />
+    <span>Add Purchase</span>
+  </button>
+</div>
+</div>
 
-      {/* Purchase Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-  <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-gray-900">Add New Purchase</h2>
-              <button
-                onClick={() => setShowModal(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="p-6 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Modal */}
+        {showModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+              {/* Modal Header */}
+              <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-5 flex justify-between items-center">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Date *</label>
-                  <input
-                    type="date"
-                    value={formData.date}
-                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
+                  <h2 className="text-2xl font-bold text-white">Add New Purchase</h2>
+                  <p className="text-blue-100 text-sm mt-1">Enter purchase details below</p>
                 </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Supplier *</label>
-                  <input
-                    type="text"
-                    value={formData.supplier}
-                    onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
-                    placeholder="Supplier name"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
-                </div>
+                <button 
+                  onClick={handleCancel} 
+                  className="text-white hover:bg-white/20 rounded-lg p-2 transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
               </div>
 
-              <div className="border-t border-gray-200 pt-4">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">Items</h3>
-                  <button
-                    type="button"
-                    onClick={addLineItem}
-                    className="flex items-center space-x-1 px-3 py-1 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>Add Item</span>
-                  </button>
-                </div>
-
-                <div className="space-y-3">
-                  {lineItems.map((line, index) => (
-                    <div key={line.id} className="grid grid-cols-12 gap-3 items-start p-3 bg-gray-50 rounded-lg">
-                      <div className="col-span-3">
-                        <label className="block text-xs font-medium text-gray-700 mb-1">Item Type</label>
-                        <select
-                          value={line.itemType}
-                          onChange={(e) => updateLineItem(line.id, 'itemType', e.target.value)}
-                          className="w-full px-2 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                          required
-                        >
-                          {ITEM_TYPES.map(type => (
-                            <option key={type} value={type}>{type}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {line.itemType === 'OTHER' && (
-                        <div className="col-span-3">
-                          <label className="block text-xs font-medium text-gray-700 mb-1">Item Name</label>
-                          <input
-                            type="text"
-                            value={line.customItemName}
-                            onChange={(e) => updateLineItem(line.id, 'customItemName', e.target.value)}
-                            placeholder="Item name"
-                            className="w-full px-2 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                            required
-                            list="custom-items"
-                          />
-                          <datalist id="custom-items">
-                            {customItems.map(item => (
-                              <option key={item} value={item} />
-                            ))}
-                          </datalist>
-                        </div>
-                      )}
-
-                      <div className={line.itemType === 'OTHER' ? 'col-span-2' : 'col-span-3'}>
-                        <label className="block text-xs font-medium text-gray-700 mb-1">Quantity</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={line.quantity}
-                          onChange={(e) => updateLineItem(line.id, 'quantity', e.target.value)}
-                          placeholder="0"
-                          className="w-full px-2 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                          required
-                        />
-                      </div>
-
-                      <div className={line.itemType === 'OTHER' ? 'col-span-2' : 'col-span-3'}>
-                        <label className="block text-xs font-medium text-gray-700 mb-1">Price/Unit</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={line.pricePerUnit}
-                          onChange={(e) => updateLineItem(line.id, 'pricePerUnit', e.target.value)}
-                          placeholder="0.00"
-                          className="w-full px-2 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                          required
-                        />
-                      </div>
-
-                      <div className={line.itemType === 'OTHER' ? 'col-span-1' : 'col-span-2'}>
-                        <label className="block text-xs font-medium text-gray-700 mb-1">Total</label>
-                        <div className="px-2 py-2 text-sm font-semibold text-gray-900 bg-gray-100 rounded-lg text-center">
-                          {((parseFloat(line.quantity) || 0) * (parseFloat(line.pricePerUnit) || 0)).toLocaleString('en-PK', { maximumFractionDigits: 0 })}
-                        </div>
-                      </div>
-
-                      <div className="col-span-1 flex items-end">
-                        {lineItems.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => removeLineItem(line.id)}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
-                            title="Remove item"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
+              {/* Modal Body */}
+              <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto">
+                <div className="p-6 space-y-6">
+                  {/* Date & Supplier */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Purchase Date *</label>
+                      <input
+                        type="date"
+                        value={formData.date}
+                        onChange={e => setFormData({ ...formData, date: e.target.value })}
+                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                        required
+                      />
                     </div>
-                  ))}
-                </div>
-              </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Supplier Name *</label>
+                      <input
+                        type="text"
+                        value={formData.supplier}
+                        onChange={e => setFormData({ ...formData, supplier: e.target.value })}
+                        placeholder="Enter supplier name"
+                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                        required
+                      />
+                    </div>
+                  </div>
 
-              <div className="flex items-center justify-between pt-4 border-t border-gray-200">
-                <div className="text-right">
-                  <p className="text-sm text-gray-600">Grand Total</p>
-                  <p className="text-3xl font-bold text-blue-600">
-                    Rs {getTotalAmount().toLocaleString('en-PK')}
-                  </p>
+                  {/* Items Section */}
+                  <div className="border-t-2 border-gray-200 pt-6">
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-lg font-bold text-gray-900">Purchase Items</h3>
+                      <button
+                        type="button"
+                        onClick={addLineItem}
+                        className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors shadow-md"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Add Item
+                      </button>
+                    </div>
+
+                    <div className="space-y-3">
+                      {lineItems.map((line, index) => (
+                        <div key={line.id} className="bg-gradient-to-br from-gray-50 to-gray-100 p-4 rounded-xl border-2 border-gray-200 hover:border-blue-300 transition-all">
+                          <div className="grid grid-cols-12 gap-3 items-end">
+                            {/* Item Type */}
+                            <div className="col-span-3">
+                              <label className="block text-xs font-semibold text-gray-600 mb-1">Item Type</label>
+                              <select
+                                value={line.itemType}
+                                onChange={e => updateLineItem(line.id, 'itemType', e.target.value)}
+                                className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-sm font-medium"
+                                required
+                              >
+                                {ITEM_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                              </select>
+                            </div>
+
+                            {/* Custom Item Name (if OTHER) */}
+                            {line.itemType === 'OTHER' && (
+                              <div className="col-span-3">
+                                <label className="block text-xs font-semibold text-gray-600 mb-1">Item Name *</label>
+                                <input
+                                  type="text"
+                                  value={line.customItemName}
+                                  onChange={e => updateLineItem(line.id, 'customItemName', e.target.value)}
+                                  placeholder="Enter item name"
+                                  className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                                  required
+                                  list="custom-items"
+                                />
+                                <datalist id="custom-items">
+                                  {customItems.map(item => <option key={item} value={item} />)}
+                                </datalist>
+                              </div>
+                            )}
+
+                            {/* Price per Unit */}
+                            <div className={line.itemType === 'OTHER' ? 'col-span-2' : 'col-span-3'}>
+                              <label className="block text-xs font-semibold text-gray-600 mb-1">Price/Unit (Rs)</label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={line.pricePerUnit}
+                                onChange={e => updateLineItem(line.id, 'pricePerUnit', e.target.value)}
+                                placeholder="0.00"
+                                className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm font-medium"
+                                required
+                              />
+                            </div>
+
+                            {/* Quantity */}
+                            <div className={line.itemType === 'OTHER' ? 'col-span-2' : 'col-span-3'}>
+                              <label className="block text-xs font-semibold text-gray-600 mb-1">Quantity</label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={line.quantity}
+                                onChange={e => updateLineItem(line.id, 'quantity', e.target.value)}
+                                placeholder="0"
+                                className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm font-medium"
+                                required
+                              />
+                            </div>
+
+                            {/* Total */}
+                            <div className={line.itemType === 'OTHER' ? 'col-span-1' : 'col-span-2'}>
+                              <label className="block text-xs font-semibold text-gray-600 mb-1">Total</label>
+                              <div className="px-3 py-2.5 bg-blue-50 border-2 border-blue-200 rounded-lg text-center">
+                                <span className="text-sm font-bold text-blue-700">
+                                  {((parseFloat(line.quantity) || 0) * (parseFloat(line.pricePerUnit) || 0)).toLocaleString('en-PK', { maximumFractionDigits: 0 })}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Delete Button */}
+                            <div className="col-span-1 flex items-end justify-center">
+                              <button
+                                type="button"
+                                onClick={() => removeLineItem(line.id)}
+                                disabled={lineItems.length === 1}
+                                className={`p-2.5 rounded-lg transition-all ${
+                                  lineItems.length === 1 
+                                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                                    : 'bg-red-50 text-red-600 hover:bg-red-100'
+                                }`}
+                                title={lineItems.length === 1 ? 'Cannot remove last item' : 'Remove item'}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex space-x-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowModal(false)}
-                    className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
-                  >
-                    Save Purchase
-                  </button>
+                {/* Modal Footer */}
+                <div className="sticky bottom-0 bg-white border-t-2 border-gray-200 px-6 py-5">
+                  <div className="flex justify-between items-center">
+                    <div className="text-left">
+                      <p className="text-sm text-gray-500 font-medium mb-1">Grand Total</p>
+                      <p className="text-4xl font-bold text-blue-600">
+                        Rs {getTotalAmount().toLocaleString('en-PK')}
+                      </p>
+                    </div>
+                    
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={handleCancel}
+                        className="px-8 py-3 border-2 border-gray-300 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-8 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl hover:from-blue-700 hover:to-blue-800 transition-all"
+                      >
+                        Save Purchase
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </form>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Purchase History */}
-      <div className="bg-white rounded-lg shadow-md overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-xl font-bold text-gray-900">Purchase History</h2>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Item</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Batch #</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Supplier</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Quantity</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Price/Unit</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Cost</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Remaining</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {purchases.map(purchase => (
-                <tr key={purchase.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-sm text-gray-900">
-                    {format(new Date(purchase.date), 'MMM dd, yyyy')}
-                  </td>
-                  <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                    {purchase.itemType === 'OTHER' ? purchase.customItemName : purchase.itemType}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{purchase.batchNumber}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{purchase.supplier}</td>
-                  <td className="px-6 py-4 text-sm text-right text-gray-900">{purchase.quantity}</td>
-                  <td className="px-6 py-4 text-sm text-right text-gray-900">
-                    Rs {purchase.pricePerUnit.toLocaleString('en-PK')}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-right font-semibold text-gray-900">
-                    Rs {purchase.totalCost.toLocaleString('en-PK')}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-right">
-                    <span className={purchase.remainingQuantity > 0 ? 'text-green-600' : 'text-gray-400'}>
-                      {purchase.remainingQuantity}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <button
-                      onClick={() => deletePurchase(purchase.id)}
-                      className="text-red-600 hover:text-red-800"
-                      title="Delete"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </td>
+        {/* Purchase History Table */}
+        <div className="bg-white shadow-xl rounded-2xl overflow-hidden border border-gray-200">
+          <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
+            <h2 className="text-xl font-bold text-gray-900">Purchase History</h2>
+            <p className="text-sm text-gray-600 mt-1">View all your purchase records</p>
+          </div>
+          
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Date</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Item</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Batch #</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Supplier</th>
+                  <th className="px-6 py-4 text-right text-xs font-bold text-gray-600 uppercase tracking-wider">Quantity</th>
+                  <th className="px-6 py-4 text-right text-xs font-bold text-gray-600 uppercase tracking-wider">Price/Unit</th>
+                  <th className="px-6 py-4 text-right text-xs font-bold text-gray-600 uppercase tracking-wider">Total Cost</th>
+                  <th className="px-6 py-4 text-right text-xs font-bold text-gray-600 uppercase tracking-wider">Remaining</th>
+                  <th className="px-6 py-4 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {purchases.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="px-6 py-12 text-center">
+                      <div className="flex flex-col items-center justify-center text-gray-400">
+                        <Plus className="w-16 h-16 mb-4 opacity-20" />
+                        <p className="text-lg font-semibold">No purchases recorded yet</p>
+                        <p className="text-sm mt-1">Click "Add Purchase" to get started</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  purchases.map(p => (
+                    <tr key={p.id} className="hover:bg-blue-50 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {format(new Date(p.date), 'MMM dd, yyyy')}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="text-sm font-semibold text-gray-900">
+                          {p.itemType === 'OTHER' ? p.customItemName : p.itemType}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 font-mono">
+                        {p.batchNumber}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {p.supplier}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-gray-900">
+                        {p.quantity}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900">
+                        Rs {p.pricePerUnit.toLocaleString('en-PK')}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-gray-900">
+                        Rs {p.totalCost.toLocaleString('en-PK')}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
+                        <span className={`font-bold ${p.remainingQuantity > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                          {p.remainingQuantity}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <button
+                          onClick={() => deletePurchase(p.id)}
+                          className="inline-flex items-center justify-center p-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition-colors"
+                          title="Delete purchase"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
