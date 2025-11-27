@@ -76,13 +76,17 @@ export default function PurchasePage() {
   };
 
   const updateLineItem = (id: string, field: keyof PurchaseLineItem, value: string) => {
-    setLineItems(prev =>
-      prev.map(item => {
-        let updatedItem = { ...item };
+  setLineItems(prev =>
+    prev.map(item => {
+      let updatedItem = { ...item };
 
-        if (item.id === id) {
+      if (item.id === id) {
+        if (field === 'itemType') {
+          updatedItem[field] = value as ItemType | 'OTHER';
+        } else {
           updatedItem[field] = value;
         }
+      }
 
         // Auto-calculate BN and C prices from SN with rounding to nearest 10
         const snLine = prev.find(li => li.itemType === 'SN');
