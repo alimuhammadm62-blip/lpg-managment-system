@@ -202,10 +202,10 @@ export default function PurchasePage() {
 
         {/* Modal */}
         {showModal && (
-         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto">
-  <div className="min-h-screen w-full flex items-center justify-center py-4">
-            <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl w-full max-w-5xl my-auto overflow-hidden flex flex-col" style={{ maxHeight: 'calc(100vh - 32px)' }}>
-{/* Modal Header */}
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4">
+<div className="max-h-[90vh] mt-10 mb-10">
+            <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] sm:max-h-[90vh] overflow-hidden flex flex-col">
+              {/* Modal Header */}
               <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-4 sm:px-6 py-4 sm:py-5 flex justify-between items-center">
                 <div>
                   <h2 className="text-xl sm:text-2xl font-bold text-white">Add New Purchase</h2>
@@ -386,8 +386,8 @@ export default function PurchasePage() {
                   </div>
                 </div>
               </form>
+</div>
             </div>
- </div>
           </div>
         )}
 
