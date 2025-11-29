@@ -158,21 +158,22 @@ export default function SalePage() {
       }
 
       // Track which batches were used
-      const batchesUsed: string[] = [];
+      const batchesUsed: { batchId: string; quantity: number }[] = [];
 
-      for (const purchase of sortedPurchases) {
-        if (quantityToDeduct <= 0) break;
+for (const purchase of sortedPurchases) {
+  if (quantityToDeduct <= 0) break;
 
-        if (purchase.remainingQuantity >= quantityToDeduct) {
-          purchase.remainingQuantity -= quantityToDeduct;
-          batchesUsed.push(purchase.batchNumber);
-          quantityToDeduct = 0;
-        } else {
-          quantityToDeduct -= purchase.remainingQuantity;
-          batchesUsed.push(purchase.batchNumber);
-          purchase.remainingQuantity = 0;
-        }
-      }
+  if (purchase.remainingQuantity >= quantityToDeduct) {
+    purchase.remainingQuantity -= quantityToDeduct;
+    batchesUsed.push({ batchId: purchase.batchNumber, quantity: quantityToDeduct });
+    quantityToDeduct = 0;
+  } else {
+    batchesUsed.push({ batchId: purchase.batchNumber, quantity: purchase.remainingQuantity });
+    quantityToDeduct -= purchase.remainingQuantity;
+    purchase.remainingQuantity = 0;
+  }
+}
+
 
       // Create sale record
       const newSale: SaleItem = {
