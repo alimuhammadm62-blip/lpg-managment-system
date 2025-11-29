@@ -1,27 +1,44 @@
-// app/finance/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Plus, ArrowRightLeft, Trash2, Wallet } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Plus, ArrowRightLeft, Trash2, Wallet, Building, Home, MinusCircle } from 'lucide-react';
 import { storage, STORAGE_KEYS, initializeAccounts } from '@/lib/storage';
 import type { Account, Transaction } from '@/lib/types';
-import { format } from 'date-fns';
+
+const formatDate = (date: Date) => {
+  const d = new Date(date);
+  const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
+  const day = d.getDate().toString().padStart(2, '0');
+  const year = d.getFullYear();
+  return `${month} ${day}, ${year}`;
+};
+
+const formatDateInput = (date: Date) => {
+  const d = new Date(date);
+  const year = d.getFullYear();
+  const month = (d.getMonth() + 1).toString().padStart(2, '0');
+  const day = d.getDate().toString().padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 export default function FinancePage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [activeTab, setActiveTab] = useState<'expense' | 'transfer' | 'deposit'>('expense');
+  const [dateRange, setDateRange] = useState({
+    startDate: '',
+    endDate: ''
+  });
   
   const [expenseForm, setExpenseForm] = useState({
-    date: format(new Date(), 'yyyy-MM-dd'),
+    date: formatDateInput(new Date()),
     amount: '',
     fromAccount: 'shop',
-    category: '',
     description: ''
   });
 
   const [transferForm, setTransferForm] = useState({
-    date: format(new Date(), 'yyyy-MM-dd'),
+    date: formatDateInput(new Date()),
     amount: '',
     fromAccount: 'shop',
     toAccount: 'bank',
@@ -29,10 +46,9 @@ export default function FinancePage() {
   });
 
   const [depositForm, setDepositForm] = useState({
-    date: format(new Date(), 'yyyy-MM-dd'),
+    date: formatDateInput(new Date()),
     amount: '',
     toAccount: 'shop',
-    category: '',
     description: ''
   });
 
@@ -69,7 +85,6 @@ export default function FinancePage() {
       type: 'expense',
       amount: parseFloat(expenseForm.amount),
       fromAccount: expenseForm.fromAccount,
-      category: expenseForm.category,
       description: expenseForm.description
     };
 
@@ -80,10 +95,9 @@ export default function FinancePage() {
     setAccounts([...accounts]);
     
     setExpenseForm({
-      date: format(new Date(), 'yyyy-MM-dd'),
+      date: formatDateInput(new Date()),
       amount: '',
       fromAccount: 'shop',
-      category: '',
       description: ''
     });
   };
@@ -115,7 +129,7 @@ export default function FinancePage() {
       fromAccount: transferForm.fromAccount,
       toAccount: transferForm.toAccount,
       category: 'Transfer',
-      description: transferForm.description
+      description: transferForm.description || ''
     };
 
     storage.set(STORAGE_KEYS.ACCOUNTS, accounts);
@@ -125,7 +139,7 @@ export default function FinancePage() {
     setAccounts([...accounts]);
     
     setTransferForm({
-      date: format(new Date(), 'yyyy-MM-dd'),
+      date: formatDateInput(new Date()),
       amount: '',
       fromAccount: 'shop',
       toAccount: 'bank',
@@ -147,7 +161,6 @@ export default function FinancePage() {
       type: 'deposit',
       amount: parseFloat(depositForm.amount),
       toAccount: depositForm.toAccount,
-      category: depositForm.category,
       description: depositForm.description
     };
 
@@ -158,399 +171,428 @@ export default function FinancePage() {
     setAccounts([...accounts]);
     
     setDepositForm({
-      date: format(new Date(), 'yyyy-MM-dd'),
+      date: formatDateInput(new Date()),
       amount: '',
       toAccount: 'shop',
-      category: '',
       description: ''
     });
   };
 
   const deleteTransaction = (id: string) => {
-    if (confirm('Are you sure? This will not restore account balances automatically.')) {
+    if (confirm('Are you sure you want to delete this transaction? Account balances will be adjusted.')) {
+      const txToDelete = transactions.find(t => t.id === id);
+      if (!txToDelete) return;
+
+      // Reverse the transaction impact on accounts
+      if (txToDelete.type === 'expense') {
+        const account = accounts.find(a => a.type === txToDelete.fromAccount);
+        if (account) account.balance += txToDelete.amount;
+      } else if (txToDelete.type === 'deposit') {
+        const account = accounts.find(a => a.type === txToDelete.toAccount);
+        if (account) account.balance -= txToDelete.amount;
+      } else if (txToDelete.type === 'transfer') {
+        const fromAcc = accounts.find(a => a.type === txToDelete.fromAccount);
+        const toAcc = accounts.find(a => a.type === txToDelete.toAccount);
+        if (fromAcc) fromAcc.balance += txToDelete.amount;
+        if (toAcc) toAcc.balance -= txToDelete.amount;
+      }
+
       const updated = transactions.filter(t => t.id !== id);
+      storage.set(STORAGE_KEYS.ACCOUNTS, accounts);
       storage.set(STORAGE_KEYS.TRANSACTIONS, updated);
+      setAccounts([...accounts]);
       setTransactions(updated);
     }
   };
 
-  const totalBalance = accounts.reduce((sum, acc) => sum + acc.balance, 0);
-  const totalExpenses = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
-
   const getAccountIcon = (type: string) => {
-    const colors = {
-      shop: 'bg-blue-600',
-      bank: 'bg-green-600',
-      home: 'bg-purple-600'
+    const icons = {
+      shop: { Icon: Wallet, color: 'bg-blue-600', lightColor: 'bg-blue-100', textColor: 'text-blue-600' },
+      home: { Icon: Home, color: 'bg-purple-600', lightColor: 'bg-purple-100', textColor: 'text-purple-600' },
+      bank: { Icon: Building, color: 'bg-emerald-600', lightColor: 'bg-emerald-100', textColor: 'text-emerald-600' },
+      equity: { Icon: Wallet, color: 'bg-amber-600', lightColor: 'bg-amber-100', textColor: 'text-amber-600' }
     };
-    return colors[type as keyof typeof colors] || 'bg-gray-600';
+    return icons[type as keyof typeof icons] || icons.shop;
   };
 
+  const filteredTransactions = transactions.filter(tx => {
+    const txDate = new Date(tx.date);
+    if (dateRange.startDate && new Date(dateRange.startDate) > txDate) return false;
+    if (dateRange.endDate && new Date(dateRange.endDate) < txDate) return false;
+    return true;
+  });
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Financial Management</h1>
-        <div className="text-right">
-          <p className="text-sm text-gray-600">Total Balance</p>
-          <p className="text-2xl font-bold text-green-600">
-            Rs {totalBalance.toLocaleString('en-PK')}
-          </p>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-slate-800">Finance & Accounts</h1>
+          <p className="text-slate-500 mt-1">Manage cash flow across Shop, Home, Bank, and Equity accounts.</p>
         </div>
-      </div>
 
-      {/* Account Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {accounts.map(account => (
-          <div key={account.id} className="bg-white rounded-lg shadow-md overflow-hidden">
-            <div className={`${getAccountIcon(account.type)} px-6 py-4 text-white`}>
-              <div className="flex items-center space-x-2 mb-2">
-                <Wallet className="w-5 h-5" />
-                <h3 className="text-lg font-bold">{account.name}</h3>
+        {/* Account Balance Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          {accounts.map(account => {
+            const { Icon, color, lightColor, textColor } = getAccountIcon(account.type);
+            return (
+              <div key={account.id} className={`bg-white rounded-lg shadow-sm hover:shadow-md transition-all border-t-4 ${color.replace('bg-', 'border-t-')}`}>
+                <div className="p-6">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className={`p-2 ${lightColor} rounded-lg ${textColor}`}>
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    <h3 className="font-semibold text-slate-700">{account.name}</h3>
+                  </div>
+                  <p className="text-2xl font-bold text-slate-800">
+                    Rs {account.balance.toLocaleString('en-PK')}
+                  </p>
+                </div>
               </div>
-              <p className="text-3xl font-bold">
-                Rs {account.balance.toLocaleString('en-PK')}
-              </p>
-            </div>
-            <div className="px-6 py-3 bg-gray-50">
-              <p className="text-xs text-gray-600 uppercase tracking-wide">{account.type} Account</p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Transaction Forms */}
-      <div className="bg-white rounded-lg shadow-md">
-        <div className="border-b border-gray-200">
-          <div className="flex">
-            {(['expense', 'transfer', 'deposit'] as const).map(tab => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`px-6 py-4 font-medium transition-colors ${
-                  activeTab === tab
-                    ? 'border-b-2 border-blue-600 text-blue-600'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                {tab === 'expense' && 'Record Expense'}
-                {tab === 'transfer' && 'Transfer Money'}
-                {tab === 'deposit' && 'Add Money'}
-              </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
 
-        <div className="p-6">
-          {activeTab === 'expense' && (
-            <form onSubmit={handleExpense} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
-                  <input
-                    type="date"
-                    value={expenseForm.date}
-                    onChange={(e) => setExpenseForm({ ...expenseForm, date: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
-                </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Transaction Form */}
+          <div className="lg:col-span-1">
+            <div className="bg-white rounded-lg shadow-sm">
+              <div className="border-b border-slate-200 px-6 py-4">
+                <h3 className="font-bold text-lg text-slate-800">Record Transaction</h3>
+              </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Amount (Rs)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={expenseForm.amount}
-                    onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })}
-                    placeholder="0.00"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Pay From</label>
-                  <select
-                    value={expenseForm.fromAccount}
-                    onChange={(e) => setExpenseForm({ ...expenseForm, fromAccount: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
+              {/* Tab Selector */}
+              <div className="px-6 pt-4">
+                <div className="flex gap-2 p-1 bg-slate-100 rounded-lg">
+                  <button
+                    onClick={() => setActiveTab('expense')}
+                    className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${
+                      activeTab === 'expense' ? 'bg-white shadow-sm text-red-600' : 'text-slate-500 hover:text-slate-700'
+                    }`}
                   >
-                    {accounts.map(acc => (
-                      <option key={acc.id} value={acc.type}>
-                        {acc.name} (Rs {acc.balance.toLocaleString('en-PK')})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                  <input
-                    type="text"
-                    value={expenseForm.category}
-                    onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value })}
-                    placeholder="e.g., Rent, Utilities, Salary"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                    list="expense-categories"
-                  />
-                  <datalist id="expense-categories">
-                    <option value="Rent" />
-                    <option value="Utilities" />
-                    <option value="Salary" />
-                    <option value="Transport" />
-                    <option value="Maintenance" />
-                    <option value="Supplies" />
-                  </datalist>
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                  <input
-                    type="text"
-                    value={expenseForm.description}
-                    onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })}
-                    placeholder="Brief description of expense"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
+                    Expense
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('transfer')}
+                    className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${
+                      activeTab === 'transfer' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    Transfer
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('deposit')}
+                    className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${
+                      activeTab === 'deposit' ? 'bg-white shadow-sm text-green-600' : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    Deposit
+                  </button>
                 </div>
               </div>
 
-              <button
-                type="submit"
-                className="flex items-center space-x-2 px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
-              >
-                <Plus className="w-5 h-5" />
-                <span>Record Expense</span>
-              </button>
-            </form>
-          )}
+              <div className="p-6">
+                {/* Expense Form */}
+                {activeTab === 'expense' && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Amount</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={expenseForm.amount}
+                        onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })}
+                        placeholder="0.00"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        required
+                      />
+                    </div>
 
-          {activeTab === 'transfer' && (
-            <form onSubmit={handleTransfer} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
-                  <input
-                    type="date"
-                    value={transferForm.date}
-                    onChange={(e) => setTransferForm({ ...transferForm, date: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
-                </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+                      <input
+                        type="text"
+                        value={expenseForm.description}
+                        onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })}
+                        placeholder="e.g., Shop Rent, Electricity..."
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        required
+                      />
+                    </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Amount (Rs)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={transferForm.amount}
-                    onChange={(e) => setTransferForm({ ...transferForm, amount: e.target.value })}
-                    placeholder="0.00"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
-                </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">From Account</label>
+                      <select
+                        value={expenseForm.fromAccount}
+                        onChange={(e) => setExpenseForm({ ...expenseForm, fromAccount: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        required
+                      >
+                        {accounts.map(acc => (
+                          <option key={acc.id} value={acc.type}>{acc.name}</option>
+                        ))}
+                      </select>
+                    </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">From Account</label>
-                  <select
-                    value={transferForm.fromAccount}
-                    onChange={(e) => setTransferForm({ ...transferForm, fromAccount: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  >
-                    {accounts.map(acc => (
-                      <option key={acc.id} value={acc.type}>
-                        {acc.name} (Rs {acc.balance.toLocaleString('en-PK')})
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
+                      <input
+                        type="date"
+                        value={expenseForm.date}
+                        onChange={(e) => setExpenseForm({ ...expenseForm, date: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        required
+                      />
+                    </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">To Account</label>
-                  <select
-                    value={transferForm.toAccount}
-                    onChange={(e) => setTransferForm({ ...transferForm, toAccount: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  >
-                    {accounts.filter(a => a.type !== transferForm.fromAccount).map(acc => (
-                      <option key={acc.id} value={acc.type}>
-                        {acc.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="md:col-span-2 lg:col-span-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                  <input
-                    type="text"
-                    value={transferForm.description}
-                    onChange={(e) => setTransferForm({ ...transferForm, description: e.target.value })}
-                    placeholder="Purpose of transfer"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="flex items-center space-x-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-              >
-                <ArrowRightLeft className="w-5 h-5" />
-                <span>Transfer Money</span>
-              </button>
-            </form>
-          )}
-
-          {activeTab === 'deposit' && (
-            <form onSubmit={handleDeposit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
-                  <input
-                    type="date"
-                    value={depositForm.date}
-                    onChange={(e) => setDepositForm({ ...depositForm, date: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Amount (Rs)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={depositForm.amount}
-                    onChange={(e) => setDepositForm({ ...depositForm, amount: e.target.value })}
-                    placeholder="0.00"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Add To</label>
-                  <select
-                    value={depositForm.toAccount}
-                    onChange={(e) => setDepositForm({ ...depositForm, toAccount: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  >
-                    {accounts.map(acc => (
-                      <option key={acc.id} value={acc.type}>
-                        {acc.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Source</label>
-                  <input
-                    type="text"
-                    value={depositForm.category}
-                    onChange={(e) => setDepositForm({ ...depositForm, category: e.target.value })}
-                    placeholder="e.g., Personal Investment, Loan"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                  <input
-                    type="text"
-                    value={depositForm.description}
-                    onChange={(e) => setDepositForm({ ...depositForm, description: e.target.value })}
-                    placeholder="Brief description"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="flex items-center space-x-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
-              >
-                <Plus className="w-5 h-5" />
-                <span>Add Money</span>
-              </button>
-            </form>
-          )}
-        </div>
-      </div>
-
-      {/* Transaction History */}
-      <div className="bg-white rounded-lg shadow-md overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-xl font-bold text-gray-900">Transaction History</h2>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">From/To</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {transactions.map(transaction => (
-                <tr key={transaction.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-sm text-gray-900">
-                    {format(new Date(transaction.date), 'MMM dd, yyyy')}
-                  </td>
-                  <td className="px-6 py-4 text-sm">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      transaction.type === 'expense'
-                        ? 'bg-red-100 text-red-800'
-                        : transaction.type === 'deposit'
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-blue-100 text-blue-800'
-                    }`}>
-                      {transaction.type.toUpperCase()}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-900">{transaction.category}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">
-                    {transaction.type === 'transfer' 
-                      ? `${transaction.fromAccount} → ${transaction.toAccount}`
-                      : transaction.fromAccount || transaction.toAccount}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-right font-semibold">
-                    <span className={
-                      transaction.type === 'expense' ? 'text-red-600' : 'text-green-600'
-                    }>
-                      {transaction.type === 'expense' ? '-' : '+'} Rs {transaction.amount.toLocaleString('en-PK')}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{transaction.description}</td>
-                  <td className="px-6 py-4 text-right">
                     <button
-                      onClick={() => deleteTransaction(transaction.id)}
-                      className="text-red-600 hover:text-red-800"
-                      title="Delete"
+                      onClick={handleExpense}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-all shadow-lg shadow-red-500/30"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <MinusCircle className="w-4 h-4" />
+                      <span>Record Expense</span>
                     </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                )}
+
+                {/* Transfer Form */}
+                {activeTab === 'transfer' && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Amount</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={transferForm.amount}
+                        onChange={(e) => setTransferForm({ ...transferForm, amount: e.target.value })}
+                        placeholder="0.00"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+                      <input
+                        type="text"
+                        value={transferForm.description}
+                        onChange={(e) => setTransferForm({ ...transferForm, description: e.target.value })}
+                        placeholder="Purpose of transfer"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">From Account</label>
+                      <select
+                        value={transferForm.fromAccount}
+                        onChange={(e) => setTransferForm({ ...transferForm, fromAccount: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        required
+                      >
+                        {accounts.map(acc => (
+                          <option key={acc.id} value={acc.type}>{acc.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">To Account</label>
+                      <select
+                        value={transferForm.toAccount}
+                        onChange={(e) => setTransferForm({ ...transferForm, toAccount: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        required
+                      >
+                        {accounts.filter(a => a.type !== transferForm.fromAccount).map(acc => (
+                          <option key={acc.id} value={acc.type}>{acc.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
+                      <input
+                        type="date"
+                        value={transferForm.date}
+                        onChange={(e) => setTransferForm({ ...transferForm, date: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        required
+                      />
+                    </div>
+
+                    <button
+                      onClick={handleTransfer}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-all shadow-lg shadow-blue-500/30"
+                    >
+                      <ArrowRightLeft className="w-4 h-4" />
+                      <span>Transfer Funds</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* Deposit Form */}
+                {activeTab === 'deposit' && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Amount</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={depositForm.amount}
+                        onChange={(e) => setDepositForm({ ...depositForm, amount: e.target.value })}
+                        placeholder="0.00"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+                      <input
+                        type="text"
+                        value={depositForm.description}
+                        onChange={(e) => setDepositForm({ ...depositForm, description: e.target.value })}
+                        placeholder="Brief description"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">To Account</label>
+                      <select
+                        value={depositForm.toAccount}
+                        onChange={(e) => setDepositForm({ ...depositForm, toAccount: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        required
+                      >
+                        {accounts.map(acc => (
+                          <option key={acc.id} value={acc.type}>{acc.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
+                      <input
+                        type="date"
+                        value={depositForm.date}
+                        onChange={(e) => setDepositForm({ ...depositForm, date: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        required
+                      />
+                    </div>
+
+                    <button
+                      onClick={handleDeposit}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-all shadow-lg shadow-green-500/30"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Add Money</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Transaction Log */}
+          <div className="lg:col-span-2">
+            <div className="bg-white rounded-lg shadow-sm">
+              <div className="border-b border-slate-200 px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <h3 className="font-bold text-lg text-slate-800">Recent Transactions</h3>
+                <div className="flex gap-2 items-center flex-wrap">
+                  <input
+                    type="date"
+                    value={dateRange.startDate}
+                    onChange={(e) => setDateRange({ ...dateRange, startDate: e.target.value })}
+                    className="px-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Start Date"
+                  />
+                  <span className="text-slate-500">to</span>
+                  <input
+                    type="date"
+                    value={dateRange.endDate}
+                    onChange={(e) => setDateRange({ ...dateRange, endDate: e.target.value })}
+                    className="px-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="End Date"
+                  />
+                  {(dateRange.startDate || dateRange.endDate) && (
+                    <button
+                      onClick={() => setDateRange({ startDate: '', endDate: '' })}
+                      className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-800 underline"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-slate-50 text-slate-600">
+                    <tr>
+                      <th className="py-3 px-4">Date</th>
+                      <th className="py-3 px-4">Description</th>
+                      <th className="py-3 px-4">Source</th>
+                      <th className="py-3 px-4 text-right">Amount</th>
+                      <th className="py-3 px-4 text-center">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredTransactions.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-12 text-center text-slate-500">
+                          {dateRange.startDate || dateRange.endDate 
+                            ? 'No transactions found in the selected date range.' 
+                            : 'No transactions yet. Start by recording an expense or transfer.'}
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredTransactions.map((tx) => (
+                        <tr key={tx.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                          <td className="py-3 px-4 text-slate-500">
+                            {formatDate(new Date(tx.date))}
+                          </td>
+                          <td className="py-3 px-4 font-medium">
+                            <div className="flex items-center gap-2">
+                              <span className={`w-2 h-2 rounded-full ${
+                                tx.type === 'deposit' ? 'bg-green-500' : 
+                                tx.type === 'expense' ? 'bg-red-500' : 
+                                'bg-blue-500'
+                              }`}></span>
+                              {tx.description}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-slate-500">
+                            {tx.type === 'transfer' 
+                              ? `${tx.fromAccount} → ${tx.toAccount}`
+                              : tx.fromAccount || tx.toAccount}
+                          </td>
+                          <td className={`py-3 px-4 text-right font-bold ${
+                            tx.type === 'deposit' ? 'text-green-600' : 
+                            tx.type === 'expense' ? 'text-red-600' : 
+                            'text-slate-800'
+                          }`}>
+                            {tx.type === 'expense' ? '-' : ''}Rs {tx.amount.toLocaleString('en-PK')}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <button
+                              onClick={() => deleteTransaction(tx.id)}
+                              className="text-red-600 hover:text-red-800 transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

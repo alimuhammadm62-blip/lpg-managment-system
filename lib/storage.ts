@@ -49,7 +49,8 @@ export const initializeAccounts = () => {
     storage.set(STORAGE_KEYS.ACCOUNTS, [
       { id: '1', name: 'Shop', type: 'shop', balance: 0 },
       { id: '2', name: 'Bank', type: 'bank', balance: 0 },
-      { id: '3', name: 'Home', type: 'home', balance: 0 }
+      { id: '3', name: 'Home', type: 'home', balance: 0 },
+      { id: '4', name: 'Equity', type: 'equity', balance: 0 }
     ]);
   }
 };
