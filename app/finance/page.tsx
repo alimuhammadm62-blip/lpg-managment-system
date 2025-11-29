@@ -164,6 +164,7 @@ setExpenseForm({
       type: 'deposit',
       amount: parseFloat(depositForm.amount),
       toAccount: depositForm.toAccount,
+      category: 'deposit',
       description: depositForm.description
     };
 
