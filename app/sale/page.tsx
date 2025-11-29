@@ -281,15 +281,13 @@ for (const purchase of sortedPurchases) {
         // Restore to the specific batches that were used
         let remainingQuantity = sale.quantity;
         
-        for (const batchNumber of sale.batchesUsed) {
-          if (remainingQuantity <= 0) break;
-          
-          const purchase = purchases.find(p => p.batchNumber === batchNumber);
-          if (purchase) {
-            purchase.remainingQuantity += remainingQuantity;
-            remainingQuantity = 0;
-          }
-        }
+        for (const batch of sale.batchesUsed) {
+  const purchase = purchases.find(p => p.batchNumber === batch.batchId);
+  if (purchase) {
+    purchase.remainingQuantity += batch.quantity;
+  }
+}
+
       } else {
         // Fallback: add to most recent batch of same item type
         const itemMatches = (p: PurchaseItem) => {
