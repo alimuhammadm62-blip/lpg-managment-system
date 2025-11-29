@@ -103,6 +103,7 @@ setExpenseForm({
   fromAccount: 'shop',
   description: ''
 });
+};
 
   const handleTransfer = (e: React.FormEvent) => {
     e.preventDefault();
