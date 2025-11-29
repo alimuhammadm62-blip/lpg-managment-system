@@ -31,11 +31,12 @@ export default function FinancePage() {
   });
   
   const [expenseForm, setExpenseForm] = useState({
-    date: formatDateInput(new Date()),
-    amount: '',
-    fromAccount: 'shop',
-    description: ''
-  });
+  date: formatDateInput(new Date()),
+  amount: '',
+  category: '',
+  fromAccount: 'shop',
+  description: ''
+});
 
   const [transferForm, setTransferForm] = useState({
     date: formatDateInput(new Date()),
@@ -95,13 +96,13 @@ export default function FinancePage() {
     setTransactions([newTransaction, ...transactions]);
     setAccounts([...accounts]);
     
-    setExpenseForm({
-      date: formatDateInput(new Date()),
-      amount: '',
-      fromAccount: 'shop',
-      description: ''
-    });
-  };
+setExpenseForm({
+  date: formatDateInput(new Date()),
+  amount: '',
+  category: '',
+  fromAccount: 'shop',
+  description: ''
+});
 
   const handleTransfer = (e: React.FormEvent) => {
     e.preventDefault();
@@ -320,6 +321,24 @@ export default function FinancePage() {
                         required
                       />
                     </div>
+<div>
+  <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
+  <select
+    value={expenseForm.category}
+    onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value })}
+    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+    required
+  >
+    <option value="">Select category</option>
+    <option value="Food">Food</option>
+    <option value="Transport">Transport</option>
+    <option value="Shopping">Shopping</option>
+    <option value="Bills">Bills</option>
+    <option value="Entertainment">Entertainment</option>
+    <option value="Healthcare">Healthcare</option>
+    <option value="Other">Other</option>
+  </select>
+</div>
 
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1">From Account</label>
