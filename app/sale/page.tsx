@@ -278,15 +278,18 @@ for (const purchase of sortedPurchases) {
       const purchases: PurchaseItem[] = storage.get(STORAGE_KEYS.PURCHASES) || [];
       
       if (sale.batchesUsed && sale.batchesUsed.length > 0) {
-        // Restore to the specific batches that were used
-        let remainingQuantity = sale.quantity;
-        
-        for (const batch of sale.batchesUsed) {
-  const purchase = purchases.find(p => p.batchNumber === batch.batchId);
-  if (purchase) {
-    purchase.remainingQuantity += batch.quantity;
+  for (const batch of sale.batchesUsed) {
+    const purchase = purchases.find(p =>
+      p.batchNumber === batch.batchId &&
+      (sale.itemType === 'OTHER'
+        ? p.customItemName === sale.customItemName
+        : p.itemType === sale.itemType)
+    );
+
+    if (purchase) {
+      purchase.remainingQuantity += batch.quantity; // restore only what was actually used
+    }
   }
-}
 
       } else {
         // Fallback: add to most recent batch of same item type
