@@ -84,8 +84,9 @@ export default function FinancePage() {
       date: new Date(expenseForm.date),
       type: 'expense',
       amount: parseFloat(expenseForm.amount),
+      category: expenseForm.category,
       fromAccount: expenseForm.fromAccount,
-      description: expenseForm.description
+      description: expenseForm.description,
     };
 
     storage.set(STORAGE_KEYS.ACCOUNTS, accounts);
