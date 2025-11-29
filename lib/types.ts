@@ -27,6 +27,10 @@ export interface SaleItem {
   customerName?: string;
   isCredit: boolean;
   paymentStatus: 'paid' | 'pending';
+    batchesUsed?: Array<{
+    batchId: string;
+    quantity: number;
+  }>;
 }
 
 export interface Customer {
