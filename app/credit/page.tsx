@@ -69,10 +69,6 @@ export default function CreditPage() {
   };
 
   // --- Utility for Historical Balance Check ---
-  /**
-   * Calculates the customer's outstanding balance immediately before the specified transaction.
-   * This is crucial for preventing over-payment edits in history.
-   */
   const getBalanceBefore = (transactionId: string, customerId: string, allCredits: ExtendedCreditTransaction[]): number => {
     const customerCredits = allCredits
       .filter(c => c.customerId === customerId)
@@ -96,7 +92,6 @@ export default function CreditPage() {
     }
     return 0; 
   };
-  // -------------------------------------------
 
   // --- Payment Logic ---
 
@@ -117,7 +112,6 @@ export default function CreditPage() {
       return;
     }
 
-    // 1. Create a NEW transaction record for the payment (Ledger style)
     const paymentTransaction: ExtendedCreditTransaction = {
       id: `pay-${Date.now()}`,
       customerId: selectedCustomer.id,
@@ -125,20 +119,18 @@ export default function CreditPage() {
       amount: amount,
       date: new Date(paymentDate),
       dueDate: new Date(paymentDate),
-      status: 'paid', // Payments are always "paid"
-      saleId: '', // Not linked to single sale directly anymore
-      type: 'payment' // Crucial: Marks this as a payment line
+      status: 'paid', 
+      saleId: '', 
+      type: 'payment' 
     };
 
-    // 2. Update Sales Data (Sync with Sales Page)
-    // FIX: Use Omit to unbind strict paymentStatus so we can allow 'partial'
+    // Update Sales Data
     const sales = (storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || []) as (Omit<SaleItem, 'paymentStatus'> & { 
       amountRemaining?: number; 
       amountPaid?: number; 
       paymentStatus?: string; 
     })[];
     
-    // Get unpaid sales for this customer to distribute the payment
     const unpaidSales = sales
       .filter(s => s.customerId === selectedCustomer.id && s.paymentStatus !== 'paid')
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -151,7 +143,6 @@ export default function CreditPage() {
       const currentRemaining = sale.amountRemaining !== undefined ? sale.amountRemaining : sale.totalAmount;
       const amountToCover = Math.min(currentRemaining, remainingPaymentToDistribute);
 
-      // Update Sale
       sale.amountPaid = (sale.amountPaid || 0) + amountToCover;
       sale.amountRemaining = currentRemaining - amountToCover;
       
@@ -165,7 +156,7 @@ export default function CreditPage() {
       remainingPaymentToDistribute -= amountToCover;
     }
 
-    // 3. Update Shop Account
+    // Update Shop Account
     const accounts: Account[] = storage.get(STORAGE_KEYS.ACCOUNTS) || [];
     const shopAccount = accounts.find(a => a.type === 'shop');
     if (shopAccount) {
@@ -173,7 +164,6 @@ export default function CreditPage() {
       storage.set(STORAGE_KEYS.ACCOUNTS, accounts);
     }
 
-    // 4. Save Everything
     const newCredits = [...credits, paymentTransaction];
     storage.set(STORAGE_KEYS.CREDITS, newCredits);
     storage.set(STORAGE_KEYS.SALES, sales);
@@ -183,12 +173,12 @@ export default function CreditPage() {
     setPaymentAmount('');
     setSelectedCustomer(null);
   };
+
   // --- Transaction Management (Edit/Delete in History) ---
 
   const handleDeleteTransaction = (transaction: ExtendedCreditTransaction) => {
     if (!confirm('Are you sure you want to delete this transaction? This will update Sales and Inventory.')) return;
 
-    // FIX: Cast sales with Omit to allow 'partial' status updates
     const sales = (storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || []) as (Omit<SaleItem, 'paymentStatus'> & { 
       amountRemaining?: number; 
       amountPaid?: number; 
@@ -197,10 +187,8 @@ export default function CreditPage() {
     const purchases = storage.get<PurchaseItem[]>(STORAGE_KEYS.PURCHASES) || [];
 
     if (transaction.type === 'payment') {
-      // --- LOGIC FOR DELETING A PAYMENT ---
       let amountToRevert = transaction.amount;
       
-      // Find sales that were paid recently (reverse order) for this customer
       const customerSales = sales
         .filter(s => s.customerId === transaction.customerId)
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -221,7 +209,6 @@ export default function CreditPage() {
         }
       }
       
-      // Remove money from shop account
       const accounts: Account[] = storage.get(STORAGE_KEYS.ACCOUNTS) || [];
       const shopAccount = accounts.find(a => a.type === 'shop');
       if (shopAccount) {
@@ -230,12 +217,12 @@ export default function CreditPage() {
       }
 
     } else {
-      // --- LOGIC FOR DELETING A CREDIT (THE SALE ITSELF) ---
+      // Deleting a CREDIT
       if (transaction.saleId) {
         const saleToDelete = sales.find(s => s.id === transaction.saleId);
         
         if (saleToDelete) {
-          // 1. Restore Inventory
+          // Restore Inventory
           if (saleToDelete.batchesUsed && saleToDelete.batchesUsed.length > 0) {
             for (const batch of saleToDelete.batchesUsed) {
               const purchase = purchases.find(p =>
@@ -249,7 +236,6 @@ export default function CreditPage() {
               }
             }
           } else {
-            // Fallback inventory restore
             const itemMatches = (p: PurchaseItem) => {
               if (saleToDelete.itemType === 'OTHER') {
                 return p.itemType === 'OTHER' && p.customItemName === saleToDelete.customItemName;
@@ -262,21 +248,16 @@ export default function CreditPage() {
             }
           }
 
-          // 2. Remove the Sale from Sales list
-          // We must filter the original array, but 'sales' here is our casted version. 
-          // Since it's a reference, we can filter it.
           const updatedSales = sales.filter(s => s.id !== transaction.saleId);
           storage.set(STORAGE_KEYS.SALES, updatedSales);
-          storage.set(STORAGE_KEYS.PURCHASES, purchases); // Save restored inventory
+          storage.set(STORAGE_KEYS.PURCHASES, purchases); 
         }
       }
     }
 
-    // Finally, remove from Credits list and save Sales update (if payment)
     const updatedCredits = credits.filter(c => c.id !== transaction.id);
     
     storage.set(STORAGE_KEYS.CREDITS, updatedCredits);
-    // We already saved SALES inside the if/else blocks if needed, but safe to save if modified
     if (transaction.type === 'payment') {
         storage.set(STORAGE_KEYS.SALES, sales);
     }
@@ -310,15 +291,14 @@ export default function CreditPage() {
     });
 
     // 2. Sync with Sales Page
-    // FIX: Cast sales with Omit to allow 'partial' status
     const sales = (storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || []) as (Omit<SaleItem, 'paymentStatus'> & { 
       amountRemaining?: number; 
       amountPaid?: number; 
       paymentStatus?: string; 
     })[];
     
+    // --- SCENARIO A: EDITING A CREDIT (SALE) ---
     if (originalTransaction.type === 'credit' && originalTransaction.saleId) {
-      // Find the specific sale and update it
       const sale = sales.find(s => s.id === originalTransaction.saleId);
       if (sale) {
         const amountPaid = sale.amountPaid || 0;
@@ -332,10 +312,9 @@ export default function CreditPage() {
         
         sale.totalAmount = newAmount;
         sale.date = new Date(editTransDate);
-        // Recalculate remaining based on what has been paid
         sale.amountRemaining = newAmount - amountPaid;
         
-        // Update payment status
+        // Update payment status (Fixed Logic)
         if (sale.amountRemaining <= 0) {
             sale.amountRemaining = 0;
             sale.paymentStatus = 'paid';
@@ -345,28 +324,69 @@ export default function CreditPage() {
             sale.paymentStatus = 'pending';
         }
       }
-    } else if (originalTransaction.type === 'payment') {
+    } 
+    // --- SCENARIO B: EDITING A PAYMENT ---
+    else if (originalTransaction.type === 'payment') {
        
-       // CHECK 2: Payment amount cannot exceed the balance prior to this transaction.
        const balanceBefore = getBalanceBefore(originalTransaction.id, originalTransaction.customerId, credits);
-        
        if (newAmount > balanceBefore) {
-            alert(`The new payment amount (Rs ${newAmount.toLocaleString('en-PK')}) cannot exceed the customer's outstanding debt immediately prior to this transaction (Rs ${balanceBefore.toLocaleString('en-PK')}).`);
+            alert(`The new payment amount (Rs ${newAmount.toLocaleString('en-PK')}) cannot exceed the customer's outstanding debt immediately prior to this transaction.`);
             setEditingTransactionId(null);
             return;
        }
 
-       // If editing a payment amount, this is complex (re-distributing funds).
-       // However, we will update the Shop Account balance at least.
        const diff = newAmount - originalTransaction.amount;
-       const accounts: Account[] = storage.get(STORAGE_KEYS.ACCOUNTS) || [];
-       const shopAccount = accounts.find(a => a.type === 'shop');
-       if (shopAccount) {
-         shopAccount.balance += diff;
-         storage.set(STORAGE_KEYS.ACCOUNTS, accounts);
+       
+       if (diff !== 0) {
+           // Update Shop Account
+           const accounts: Account[] = storage.get(STORAGE_KEYS.ACCOUNTS) || [];
+           const shopAccount = accounts.find(a => a.type === 'shop');
+           if (shopAccount) {
+             shopAccount.balance += diff;
+             storage.set(STORAGE_KEYS.ACCOUNTS, accounts);
+           }
+
+           // Update Sales Records (Reconciliation)
+           if (diff > 0) {
+             // Added money: Distribute to oldest unpaid
+             const unpaidSales = sales
+                .filter(s => s.customerId === originalTransaction.customerId && s.paymentStatus !== 'paid')
+                .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+             let moneyDistributing = diff;
+             for (const sale of unpaidSales) {
+                if (moneyDistributing <= 0) break;
+                const remaining = sale.amountRemaining !== undefined ? sale.amountRemaining : sale.totalAmount;
+                const cover = Math.min(remaining, moneyDistributing);
+                
+                sale.amountPaid = (sale.amountPaid || 0) + cover;
+                sale.amountRemaining = remaining - cover;
+                moneyDistributing -= cover;
+
+                if (sale.amountRemaining <= 0) sale.paymentStatus = 'paid';
+                else sale.paymentStatus = 'partial';
+             }
+           } else {
+             // Removed money: Revert from newest paid
+             let moneyToTakeBack = Math.abs(diff);
+             const paidSales = sales
+                .filter(s => s.customerId === originalTransaction.customerId && (s.amountPaid || 0) > 0)
+                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()); // Newest first
+
+             for (const sale of paidSales) {
+                if (moneyToTakeBack <= 0) break;
+                const currentPaid = sale.amountPaid || 0;
+                const revertAmount = Math.min(currentPaid, moneyToTakeBack);
+
+                sale.amountPaid = currentPaid - revertAmount;
+                sale.amountRemaining = (sale.amountRemaining || 0) + revertAmount;
+                moneyToTakeBack -= revertAmount;
+
+                if (sale.amountRemaining === sale.totalAmount) sale.paymentStatus = 'pending';
+                else sale.paymentStatus = 'partial';
+             }
+           }
        }
-       // Note: To fully sync changed payment amounts to specific sales history is very hard without a full re-calc.
-       alert("Payment amount updated in ledger. For perfect accuracy across all sale records, please delete and re-enter the payment.");
     }
 
     storage.set(STORAGE_KEYS.SALES, sales);
@@ -378,8 +398,9 @@ export default function CreditPage() {
   // --- Customer Management ---
 
   const handleEditCustomer = () => {
-    if (!selectedCustomer || !editName.trim() || !editPhone.trim()) {
-      alert('Please enter customer name and phone number');
+    // FIX: Removed !editPhone.trim() check
+    if (!selectedCustomer || !editName.trim()) {
+      alert('Please enter a customer name');
       return;
     }
 
@@ -444,7 +465,6 @@ export default function CreditPage() {
   const customerSummary = customers.map(customer => {
     const customerCredits = credits.filter(c => c.customerId === customer.id);
     
-    // Ledger Calculation: (Total Debts) - (Total Payments)
     const totalDebt = customerCredits
       .filter(c => c.type === 'credit')
       .reduce((sum, c) => sum + c.amount, 0);
@@ -455,21 +475,19 @@ export default function CreditPage() {
 
     const pendingAmount = totalDebt - totalPaid;
     
-    // Calculate overdue specifically on unpaid credit lines (heuristic)
     const overdueAmount = customerCredits
       .filter(c => c.type === 'credit' && c.status === 'overdue')
       .reduce((sum, c) => sum + c.amount, 0);
 
     return {
       ...customer,
-      pendingAmount: Math.max(0, pendingAmount), // Safety floor
+      pendingAmount: Math.max(0, pendingAmount), 
       overdueAmount,
       transactionCount: customerCredits.length
     };
   }).filter(c => c.transactionCount > 0);
 
   const getCustomerHistory = (customerId: string) => {
-    // Sort oldest first for running balance calculation
     const customerCredits = credits
       .filter(c => c.customerId === customerId)
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -552,7 +570,6 @@ export default function CreditPage() {
             .map(customer => {
               const isOverdue = customer.overdueAmount > 0;
               
-              // Get actual last payment
               const lastPayment = credits
                 .filter(c => c.customerId === customer.id && c.type === 'payment')
                 .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
@@ -593,7 +610,7 @@ export default function CreditPage() {
                       <div className="flex items-center gap-4 text-sm text-slate-500">
                         <span className="flex items-center gap-1">
                           <Phone className="w-4 h-4" />
-                          {customer.phone}
+                          {customer.phone || 'No Phone'}
                         </span>
                         <span className="hidden sm:inline">•</span>
                         <span className="flex items-center gap-1">
@@ -883,12 +900,13 @@ export default function CreditPage() {
 
               <div className="mb-6">
                 <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  Phone Number
+                  Phone Number <span className="text-slate-400 text-xs font-normal">(Optional)</span>
                 </label>
                 <input
                   type="tel"
                   value={editPhone}
                   onChange={(e) => setEditPhone(e.target.value)}
+                  placeholder="Optional"
                   className="w-full px-4 py-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
                 />
               </div>
