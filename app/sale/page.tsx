@@ -10,6 +10,13 @@ const ITEM_MULTIPLIERS: Record<string, number> = {
   'C': 43,
 };
 
+// --- TYPE FIX: Extend the base SaleItem to include payment tracking fields ---
+type ExtendedSaleItem = Omit<SaleItem, 'paymentStatus'> & {
+  amountPaid?: number;
+  amountRemaining?: number;
+  paymentStatus?: 'paid' | 'pending' | 'partial';
+};
+
 interface SaleLineItem {
   id: string;
   itemType: ItemType | 'OTHER';
@@ -24,8 +31,9 @@ interface ItemPrice {
 }
 
 export default function SalePage() {
-  const [sales, setSales] = useState<SaleItem[]>([]);
-  const [filteredSales, setFilteredSales] = useState<SaleItem[]>([]);
+  // Use ExtendedSaleItem for state to prevent type errors with amountPaid/Remaining
+  const [sales, setSales] = useState<ExtendedSaleItem[]>([]);
+  const [filteredSales, setFilteredSales] = useState<ExtendedSaleItem[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [availableItems, setAvailableItems] = useState<string[]>([]);
   const [showModal, setShowModal] = useState(false);
@@ -91,7 +99,8 @@ export default function SalePage() {
   };
 
   const loadSales = () => {
-    const data = storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || [];
+    // Cast loaded data to ExtendedSaleItem[]
+    const data = (storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || []) as ExtendedSaleItem[];
     setSales(data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
   };
 
@@ -148,7 +157,6 @@ export default function SalePage() {
     }
   };
 
-  // --- FIXED: ADD LINE ITEM ---
   const addLineItem = () => {
     const defaultItem = 'BN';
     const newItem: SaleLineItem = { 
@@ -156,7 +164,6 @@ export default function SalePage() {
       itemType: defaultItem, 
       customItemName: '', 
       quantity: '', 
-      // Fetch price dynamically when adding
       pricePerUnit: getSavedPrice(defaultItem) 
     };
     setLineItems([...lineItems, newItem]);
@@ -179,8 +186,6 @@ export default function SalePage() {
     );
   };
 
-  // --- NEW: HANDLE DROPDOWN CHANGE ---
-  // This replaces the complex inline logic in the render
   const handleItemSelect = (id: string, value: string) => {
     const isStandard = ['BN', 'SN', 'C', 'BNS', 'SNS', 'CS', 'ABN', 'ASN'].includes(value);
     const fetchedPrice = getSavedPrice(value);
@@ -191,7 +196,7 @@ export default function SalePage() {
           ...item,
           itemType: isStandard ? (value as ItemType) : 'OTHER',
           customItemName: isStandard ? '' : value,
-          pricePerUnit: fetchedPrice // Automatically set the price
+          pricePerUnit: fetchedPrice 
         };
       }
       return item;
@@ -202,7 +207,7 @@ export default function SalePage() {
     e.preventDefault();
 
     const purchases: PurchaseItem[] = storage.get(STORAGE_KEYS.PURCHASES) || [];
-    const newSales: SaleItem[] = [];
+    const newSales: ExtendedSaleItem[] = []; // Typed as Extended
     const purchasesCopy = [...purchases];
 
     // Process each line item
@@ -250,9 +255,9 @@ export default function SalePage() {
         }
       }
 
-      // Create sale record
+      // Create sale record using ExtendedSaleItem type
       const totalAmount = quantity * pricePerUnit;
-      const newSale: SaleItem = {
+      const newSale: ExtendedSaleItem = {
         id: `${Date.now()}-${Math.random()}`,
         date: new Date(formData.date),
         itemType: line.itemType,
@@ -260,8 +265,8 @@ export default function SalePage() {
         quantity: quantity,
         pricePerUnit: pricePerUnit,
         totalAmount: totalAmount,
-        amountPaid: formData.isCredit ? 0 : totalAmount,
-        amountRemaining: formData.isCredit ? totalAmount : 0,
+        amountPaid: formData.isCredit ? 0 : totalAmount, // No longer an error
+        amountRemaining: formData.isCredit ? totalAmount : 0, // No longer an error
         isCredit: formData.isCredit,
         paymentStatus: formData.isCredit ? 'pending' : 'paid',
         customerId: formData.isCredit ? formData.customerId || `CUST-${Date.now()}` : undefined,
@@ -322,19 +327,17 @@ export default function SalePage() {
       }
     }
 
-    handleCancel(); // Re-use cancel logic to reset form
+    handleCancel();
     loadAvailableItems();
   };
 
-  // --- FIXED: OPEN MODAL ---
   const handleOpenModal = () => {
-    // We re-initialize the form here to ensure we capture the latest prices
     setLineItems([{ 
       id: '1', 
       itemType: 'BN', 
       customItemName: '', 
       quantity: '', 
-      pricePerUnit: getSavedPrice('BN') // Fetch price immediately
+      pricePerUnit: getSavedPrice('BN')
     }]);
     setShowModal(true);
   };
@@ -347,8 +350,6 @@ export default function SalePage() {
       customerId: '',
       customerPhone: '',
     });
-    // Resetting line items here isn't enough for re-opening, 
-    // handled in handleOpenModal now.
     setCustomerSearchTerm('');
     setShowModal(false);
   };
@@ -375,7 +376,6 @@ export default function SalePage() {
           }
         }
       } else {
-        // Fallback: add to most recent batch of same item type
         const itemMatches = (p: PurchaseItem) => {
           if (sale.itemType === 'OTHER') {
             return p.itemType === 'OTHER' && p.customItemName === sale.customItemName;
@@ -394,13 +394,11 @@ export default function SalePage() {
 
       storage.set(STORAGE_KEYS.PURCHASES, purchases);
 
-      // Remove from credits if credit sale
       if (sale.isCredit) {
         const credits: CreditTransaction[] = storage.get(STORAGE_KEYS.CREDITS) || [];
         const updatedCredits = credits.filter(c => c.saleId !== id);
         storage.set(STORAGE_KEYS.CREDITS, updatedCredits);
       } else {
-        // Deduct from shop account for cash sales
         const accounts: Account[] = storage.get(STORAGE_KEYS.ACCOUNTS) || [];
         const shopAccount = accounts.find(a => a.type === 'shop');
         if (shopAccount) {
@@ -409,7 +407,6 @@ export default function SalePage() {
         }
       }
 
-      // Remove sale
       const updatedSales = sales.filter(s => s.id !== id);
       storage.set(STORAGE_KEYS.SALES, updatedSales);
       setSales(updatedSales);
@@ -479,7 +476,7 @@ export default function SalePage() {
           </div>  
           
           <button
-            onClick={handleOpenModal} // --- CHANGED THIS HANDLER ---
+            onClick={handleOpenModal}
             className="flex items-center justify-center gap-2 px-4 sm:px-6 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-200 h-[60px] w-full sm:min-w-[180px] sm:w-auto"
           >
             <Plus className="w-5 h-5" />
@@ -490,7 +487,6 @@ export default function SalePage() {
             onClick={() => setShowPriceModal(true)}
             className="flex items-center justify-center gap-2 px-4 sm:px-6 bg-gradient-to-r from-green-600 to-green-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl hover:from-green-700 hover:to-green-800 transition-all duration-200 h-[60px] w-full sm:min-w-[180px] sm:w-auto"
           >
-            
             <span>Manage Prices</span>
           </button>
         </div>
@@ -553,7 +549,6 @@ export default function SalePage() {
                             <h3 className="text-sm sm:text-base font-bold text-gray-900">Customer Selection</h3>
                           </div>
                           
-                          {/* Existing Customer Dropdown with Plus Icon */}
                           <div>
                             <label className="block text-xs font-semibold text-gray-700 mb-2">Select Existing Customer</label>
                             <div className="flex gap-2">
@@ -666,7 +661,7 @@ export default function SalePage() {
                       {lineItems.map((line, index) => (
                         <div key={line.id} className="bg-gradient-to-br from-gray-50 to-gray-100 p-3 sm:p-4 rounded-lg sm:rounded-xl border-2 border-gray-200 hover:border-blue-300 transition-all">
                           <div className="grid grid-cols-12 gap-2 sm:gap-3 items-end">
-                            {/* Item Type/Name - UPDATED DROPDOWN HANDLER */}
+                            {/* Item Type/Name */}
                             <div className="col-span-12 sm:col-span-3">
                               <label className="block text-xs font-semibold text-gray-600 mb-1">Item</label>
                               <select 
