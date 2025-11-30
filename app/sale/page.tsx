@@ -1,107 +1,66 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Plus, Trash2, X, Calendar, Search } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, AlertTriangle, Wallet, History, User, X, Edit2, Trash2, Phone, Calendar, Save } from 'lucide-react';
 import { storage, STORAGE_KEYS } from '@/lib/storage';
-import type { SaleItem, Customer, PurchaseItem, ItemType, CreditTransaction, Account } from '@/lib/types';
-import { format, addDays, startOfMonth, endOfMonth, subMonths } from 'date-fns';
+import type { CreditTransaction, Customer, Account, SaleItem, PurchaseItem } from '@/lib/types';
+import { format, differenceInDays } from 'date-fns';
 
-const ITEM_MULTIPLIERS: Record<string, number> = {
-  'C': 43,
-};
-
-// --- TYPE FIX: Extend the base SaleItem to include payment tracking fields ---
-type ExtendedSaleItem = Omit<SaleItem, 'paymentStatus'> & {
-  amountPaid?: number;
-  amountRemaining?: number;
-  paymentStatus?: 'paid' | 'pending' | 'partial';
-};
-
-interface SaleLineItem {
-  id: string;
-  itemType: ItemType | 'OTHER';
-  customItemName: string;
-  quantity: string;
-  pricePerUnit: string;
+// Extend the type locally to support the new 'payment' type distinction
+interface ExtendedCreditTransaction extends CreditTransaction {
+  type?: 'credit' | 'payment'; 
 }
 
-interface ItemPrice {
-  itemName: string;
-  price: number;
-}
-
-export default function SalePage() {
-  // Use ExtendedSaleItem for state to prevent type errors with amountPaid/Remaining
-  const [sales, setSales] = useState<ExtendedSaleItem[]>([]);
-  const [filteredSales, setFilteredSales] = useState<ExtendedSaleItem[]>([]);
+export default function CreditPage() {
+  const [credits, setCredits] = useState<ExtendedCreditTransaction[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [availableItems, setAvailableItems] = useState<string[]>([]);
-  const [showModal, setShowModal] = useState(false);
-  const [showDateFilter, setShowDateFilter] = useState(false);
-  const [customerSearchTerm, setCustomerSearchTerm] = useState('');
-  const [customerFilter, setCustomerFilter] = useState('');
-  const [showPriceModal, setShowPriceModal] = useState(false);
-  const [itemPrices, setItemPrices] = useState<ItemPrice[]>([]);
-  const [priceFormData, setPriceFormData] = useState({
-    itemName: '',
-    price: ''
-  });
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filter, setFilter] = useState<'all' | 'overdue'>('all');
   
-  const [dateRange, setDateRange] = useState({
-    startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
-    endDate: format(endOfMonth(new Date()), 'yyyy-MM-dd')
-  });
+  // Modals
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  
+  // Selection & Form Data
+  const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentDate, setPaymentDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  
+  // Customer Edit Data
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
 
-  const [formData, setFormData] = useState({
-    date: format(new Date(), 'yyyy-MM-dd'),
-    customerName: '',
-    isCredit: false,
-    customerId: '',
-    customerPhone: '',
-  });
-
-  // Helper to look up price from state
-  const getSavedPrice = (itemName: string): string => {
-    const savedPrice = itemPrices.find(p => p.itemName === itemName);
-    return savedPrice ? savedPrice.price.toString() : '';
-  };
-
-  const [lineItems, setLineItems] = useState<SaleLineItem[]>([
-    { id: '1', itemType: 'BN', customItemName: '', quantity: '', pricePerUnit: '' },
-  ]);
+  // Transaction Edit Data (Inside History Modal)
+  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
+  const [editTransAmount, setEditTransAmount] = useState('');
+  const [editTransDate, setEditTransDate] = useState('');
 
   useEffect(() => {
-    const savedPrices = storage.get<ItemPrice[]>(STORAGE_KEYS.ITEM_PRICES) || [];
-    setItemPrices(savedPrices);
-  }, []);
-
-  useEffect(() => {
-    loadSales();
+    loadCredits();
     loadCustomers();
-    loadAvailableItems();
   }, []);
 
-  useEffect(() => {
-    filterSalesByDateRange();
-  }, [sales, dateRange]);
-
-  const filterSalesByDateRange = () => {
-    const start = new Date(dateRange.startDate);
-    const end = new Date(dateRange.endDate);
-    end.setHours(23, 59, 59, 999);
-
-    const filtered = sales.filter(sale => {
-      const saleDate = new Date(sale.date);
-      return saleDate >= start && saleDate <= end;
+  const loadCredits = () => {
+    const data = storage.get<ExtendedCreditTransaction[]>(STORAGE_KEYS.CREDITS) || [];
+    // Ensure all legacy data defaults to 'credit' type if missing
+    const normalizedData = data.map(c => ({
+      ...c,
+      type: c.type || 'credit' as const
+    }));
+    
+    // Check for overdue status on credits
+    const today = new Date();
+    normalizedData.forEach(credit => {
+      if (credit.type === 'credit' && credit.status === 'pending') {
+        const daysPending = differenceInDays(today, new Date(credit.date));
+        if (daysPending > 45) {
+          credit.status = 'overdue';
+        }
+      }
     });
 
-    setFilteredSales(filtered);
-  };
-
-  const loadSales = () => {
-    // Cast loaded data to ExtendedSaleItem[]
-    const data = (storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || []) as ExtendedSaleItem[];
-    setSales(data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+    setCredits(normalizedData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
   };
 
   const loadCustomers = () => {
@@ -109,956 +68,875 @@ export default function SalePage() {
     setCustomers(data);
   };
 
-  const loadAvailableItems = () => {
-    const purchases: PurchaseItem[] = storage.get(STORAGE_KEYS.PURCHASES) || [];
-    const customItems = storage.get<string[]>(STORAGE_KEYS.CUSTOM_ITEMS) || [];
-    
-    const itemsInStock = new Set<string>();
-    purchases.forEach(p => {
-      if (p.remainingQuantity > 0) {
-        if (p.itemType === 'OTHER' && p.customItemName) {
-          itemsInStock.add(p.customItemName);
-        }
-      }
-    });
+  // --- Utility for Historical Balance Check ---
+  const getBalanceBefore = (transactionId: string, customerId: string, allCredits: ExtendedCreditTransaction[]): number => {
+    const customerCredits = allCredits
+      .filter(c => c.customerId === customerId)
+      // Sort oldest first to correctly calculate running balance
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-    setAvailableItems(['BN', 'SN', 'C', 'BNS', 'SNS', 'CS', 'ABN', 'ASN', ...Array.from(itemsInStock), ...customItems]);
+    let runningBalance = 0;
+    
+    for (const record of customerCredits) {
+        if (record.id === transactionId) {
+            return Math.max(0, runningBalance); // Return balance *before* this record
+        }
+        const isPayment = record.type === 'payment';
+        const amount = record.amount;
+        
+        if (isPayment) {
+            runningBalance -= amount;
+        } else {
+            runningBalance += amount;
+        }
+    }
+    return 0; 
   };
 
-  const handleSavePrice = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    const price = parseFloat(priceFormData.price);
-    if (isNaN(price) || price <= 0) {
-      alert('Please enter a valid price');
+  // --- Payment Logic ---
+
+  const handleReceivePayment = () => {
+    if (!selectedCustomer || !paymentAmount || !paymentDate) {
+      alert('Please enter payment amount and date');
       return;
     }
 
-    const existingIndex = itemPrices.findIndex(p => p.itemName === priceFormData.itemName);
-    let updatedPrices: ItemPrice[];
-
-    if (existingIndex >= 0) {
-      updatedPrices = [...itemPrices];
-      updatedPrices[existingIndex] = { itemName: priceFormData.itemName, price };
-    } else {
-      updatedPrices = [...itemPrices, { itemName: priceFormData.itemName, price }];
+    const amount = parseFloat(paymentAmount);
+    if (isNaN(amount) || amount <= 0) {
+      alert('Please enter a valid amount');
+      return;
     }
 
-    storage.set(STORAGE_KEYS.ITEM_PRICES, updatedPrices);
-    setItemPrices(updatedPrices);
-    setPriceFormData({ itemName: '', price: '' });
-  };
-
-  const handleDeletePrice = (itemName: string) => {
-    if (confirm(`Delete saved price for ${itemName}?`)) {
-      const updatedPrices = itemPrices.filter(p => p.itemName !== itemName);
-      storage.set(STORAGE_KEYS.ITEM_PRICES, updatedPrices);
-      setItemPrices(updatedPrices);
+    if (amount > selectedCustomer.pendingAmount) {
+      alert(`Payment amount cannot exceed pending balance of Rs ${selectedCustomer.pendingAmount.toLocaleString('en-PK')}`);
+      return;
     }
-  };
 
-  const addLineItem = () => {
-    const defaultItem = 'BN';
-    const newItem: SaleLineItem = { 
-      id: Date.now().toString(), 
-      itemType: defaultItem, 
-      customItemName: '', 
-      quantity: '', 
-      pricePerUnit: getSavedPrice(defaultItem) 
+    const paymentTransaction: ExtendedCreditTransaction = {
+      id: `pay-${Date.now()}`,
+      customerId: selectedCustomer.id,
+      customerName: selectedCustomer.name,
+      amount: amount,
+      date: new Date(paymentDate),
+      dueDate: new Date(paymentDate),
+      status: 'paid', 
+      saleId: '', 
+      type: 'payment' 
     };
-    setLineItems([...lineItems, newItem]);
-  };
 
-  const removeLineItem = (id: string) => {
-    if (lineItems.length > 1) {
-      setLineItems(lineItems.filter(item => item.id !== id));
-    }
-  };
+    // Update Sales Data
+    const sales = (storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || []) as (Omit<SaleItem, 'paymentStatus'> & { 
+      amountRemaining?: number; 
+      amountPaid?: number; 
+      paymentStatus?: string; 
+    })[];
+    
+    const unpaidSales = sales
+      .filter(s => s.customerId === selectedCustomer.id && s.paymentStatus !== 'paid')
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  const updateLineItem = (id: string, field: keyof SaleLineItem, value: string) => {
-    setLineItems(prev =>
-      prev.map(item => {
-        if (item.id === id) {
-          return { ...item, [field]: value };
-        }
-        return item;
-      })
-    );
-  };
+    let remainingPaymentToDistribute = amount;
 
-  const handleItemSelect = (id: string, value: string) => {
-    const isStandard = ['BN', 'SN', 'C', 'BNS', 'SNS', 'CS', 'ABN', 'ASN'].includes(value);
-    const fetchedPrice = getSavedPrice(value);
+    for (const sale of unpaidSales) {
+      if (remainingPaymentToDistribute <= 0) break;
 
-    setLineItems(prev => prev.map(item => {
-      if (item.id === id) {
-        return {
-          ...item,
-          itemType: isStandard ? (value as ItemType) : 'OTHER',
-          customItemName: isStandard ? '' : value,
-          pricePerUnit: fetchedPrice 
-        };
-      }
-      return item;
-    }));
-  };
+      const currentRemaining = sale.amountRemaining !== undefined ? sale.amountRemaining : sale.totalAmount;
+      const amountToCover = Math.min(currentRemaining, remainingPaymentToDistribute);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    const purchases: PurchaseItem[] = storage.get(STORAGE_KEYS.PURCHASES) || [];
-    const newSales: ExtendedSaleItem[] = []; // Typed as Extended
-    const purchasesCopy = [...purchases];
-
-    // Process each line item
-    for (const line of lineItems) {
-      if (!line.quantity || !line.pricePerUnit) continue;
-
-      const quantity = parseFloat(line.quantity);
-      const pricePerUnit = parseFloat(line.pricePerUnit);
-
-      // Deduct from inventory using FIFO
-      let quantityToDeduct = quantity;
+      sale.amountPaid = (sale.amountPaid || 0) + amountToCover;
+      sale.amountRemaining = currentRemaining - amountToCover;
       
-      const itemMatches = (p: PurchaseItem) => {
-        if (line.itemType === 'OTHER') {
-          return p.itemType === 'OTHER' && p.customItemName === line.customItemName;
-        }
-        return p.itemType === line.itemType;
-      };
-
-      // Sort by date (FIFO - oldest first)
-      const sortedPurchases = purchasesCopy
-        .filter(itemMatches)
-        .filter(p => p.remainingQuantity > 0)
-        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-      if (sortedPurchases.reduce((sum, p) => sum + p.remainingQuantity, 0) < quantityToDeduct) {
-        alert(`Insufficient inventory for ${line.itemType === 'OTHER' ? line.customItemName : line.itemType}!`);
-        return;
+      if (sale.amountRemaining <= 0) {
+        sale.amountRemaining = 0;
+        sale.paymentStatus = 'paid';
+      } else {
+        sale.paymentStatus = 'partial';
       }
 
-      // Track which batches were used
-      const batchesUsed: { batchId: string; quantity: number }[] = [];
-
-      for (const purchase of sortedPurchases) {
-        if (quantityToDeduct <= 0) break;
-
-        if (purchase.remainingQuantity >= quantityToDeduct) {
-          purchase.remainingQuantity -= quantityToDeduct;
-          batchesUsed.push({ batchId: purchase.batchNumber, quantity: quantityToDeduct });
-          quantityToDeduct = 0;
-        } else {
-          batchesUsed.push({ batchId: purchase.batchNumber, quantity: purchase.remainingQuantity });
-          quantityToDeduct -= purchase.remainingQuantity;
-          purchase.remainingQuantity = 0;
-        }
-      }
-
-      // Create sale record using ExtendedSaleItem type
-      const totalAmount = quantity * pricePerUnit;
-      const newSale: ExtendedSaleItem = {
-        id: `${Date.now()}-${Math.random()}`,
-        date: new Date(formData.date),
-        itemType: line.itemType,
-        customItemName: line.itemType === 'OTHER' ? line.customItemName : undefined,
-        quantity: quantity,
-        pricePerUnit: pricePerUnit,
-        totalAmount: totalAmount,
-        amountPaid: formData.isCredit ? 0 : totalAmount, // No longer an error
-        amountRemaining: formData.isCredit ? totalAmount : 0, // No longer an error
-        isCredit: formData.isCredit,
-        paymentStatus: formData.isCredit ? 'pending' : 'paid',
-        customerId: formData.isCredit ? formData.customerId || `CUST-${Date.now()}` : undefined,
-        customerName: formData.customerName || undefined,
-        batchesUsed: batchesUsed
-      };
-
-      newSales.push(newSale);
+      remainingPaymentToDistribute -= amountToCover;
     }
 
-    // Save updated purchases
-    storage.set(STORAGE_KEYS.PURCHASES, purchasesCopy);
+    // Update Shop Account
+    const accounts: Account[] = storage.get(STORAGE_KEYS.ACCOUNTS) || [];
+    const shopAccount = accounts.find(a => a.type === 'shop');
+    if (shopAccount) {
+      shopAccount.balance += amount;
+      storage.set(STORAGE_KEYS.ACCOUNTS, accounts);
+    }
 
-    // Save sales
-    const allSales = [...newSales, ...sales];
-    storage.set(STORAGE_KEYS.SALES, allSales);
-    setSales(allSales);
+    const newCredits = [...credits, paymentTransaction];
+    storage.set(STORAGE_KEYS.CREDITS, newCredits);
+    storage.set(STORAGE_KEYS.SALES, sales);
+    setCredits(newCredits.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+    
+    setShowPaymentModal(false);
+    setPaymentAmount('');
+    setSelectedCustomer(null);
+  };
 
-    // Handle credit and customer
-    if (formData.isCredit && formData.customerName) {
-      let customer = customers.find(c => c.id === formData.customerId);
+  // --- Transaction Management (Edit/Delete in History) ---
+
+  const handleDeleteTransaction = (transaction: ExtendedCreditTransaction) => {
+    if (!confirm('Are you sure you want to delete this transaction? This will update Sales and Inventory.')) return;
+
+    const sales = (storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || []) as (Omit<SaleItem, 'paymentStatus'> & { 
+      amountRemaining?: number; 
+      amountPaid?: number; 
+      paymentStatus?: string; 
+    })[];
+    const purchases = storage.get<PurchaseItem[]>(STORAGE_KEYS.PURCHASES) || [];
+
+    if (transaction.type === 'payment') {
+      let amountToRevert = transaction.amount;
       
-      if (!customer) {
-        customer = {
-          id: newSales[0].customerId!,
-          name: formData.customerName,
-          phone: formData.customerPhone,
-          address: '',
-          totalCredit: 0,
-          lastPurchaseDate: new Date(formData.date)
-        };
-        const updatedCustomers = [...customers, customer];
-        storage.set(STORAGE_KEYS.CUSTOMERS, updatedCustomers);
-        setCustomers(updatedCustomers);
-      }
+      const customerSales = sales
+        .filter(s => s.customerId === transaction.customerId)
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-      // Create credit transactions for each sale
-      const credits: CreditTransaction[] = storage.get(STORAGE_KEYS.CREDITS) || [];
-      const newCredits = newSales.map(sale => ({
-        id: `${Date.now()}-${Math.random()}`,
-        customerId: customer!.id,
-        customerName: customer!.name,
-        saleId: sale.id,
-        amount: sale.totalAmount,
-        date: new Date(formData.date),
-        dueDate: addDays(new Date(formData.date), 45),
-        status: 'pending' as const
-      }));
-      storage.set(STORAGE_KEYS.CREDITS, [...credits, ...newCredits]);
-    } else if (!formData.isCredit) {
-      // Add to shop account for cash sales
+      for (const sale of customerSales) {
+        if (amountToRevert <= 0) break;
+        if ((sale.amountPaid || 0) > 0) {
+          const revertableAmount = Math.min(sale.amountPaid || 0, amountToRevert);
+          
+          sale.amountPaid = (sale.amountPaid || 0) - revertableAmount;
+          sale.amountRemaining = (sale.amountRemaining || 0) + revertableAmount;
+          
+          if (sale.amountRemaining > 0) {
+            sale.paymentStatus = sale.amountRemaining === sale.totalAmount ? 'pending' : 'partial';
+          }
+          
+          amountToRevert -= revertableAmount;
+        }
+      }
+      
       const accounts: Account[] = storage.get(STORAGE_KEYS.ACCOUNTS) || [];
       const shopAccount = accounts.find(a => a.type === 'shop');
       if (shopAccount) {
-        const totalSaleAmount = newSales.reduce((sum, s) => sum + s.totalAmount, 0);
-        shopAccount.balance += totalSaleAmount;
+        shopAccount.balance -= transaction.amount;
         storage.set(STORAGE_KEYS.ACCOUNTS, accounts);
       }
+
+    } else {
+      // Deleting a CREDIT
+      if (transaction.saleId) {
+        const saleToDelete = sales.find(s => s.id === transaction.saleId);
+        
+        if (saleToDelete) {
+          // Restore Inventory
+          if (saleToDelete.batchesUsed && saleToDelete.batchesUsed.length > 0) {
+            for (const batch of saleToDelete.batchesUsed) {
+              const purchase = purchases.find(p =>
+                p.batchNumber === batch.batchId &&
+                (saleToDelete.itemType === 'OTHER'
+                  ? p.customItemName === saleToDelete.customItemName
+                  : p.itemType === saleToDelete.itemType)
+              );
+              if (purchase) {
+                purchase.remainingQuantity += batch.quantity;
+              }
+            }
+          } else {
+            const itemMatches = (p: PurchaseItem) => {
+              if (saleToDelete.itemType === 'OTHER') {
+                return p.itemType === 'OTHER' && p.customItemName === saleToDelete.customItemName;
+              }
+              return p.itemType === saleToDelete.itemType;
+            };
+            const sortedPurchases = purchases.filter(itemMatches).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            if (sortedPurchases.length > 0) {
+              sortedPurchases[0].remainingQuantity += saleToDelete.quantity;
+            }
+          }
+
+          const updatedSales = sales.filter(s => s.id !== transaction.saleId);
+          storage.set(STORAGE_KEYS.SALES, updatedSales);
+          storage.set(STORAGE_KEYS.PURCHASES, purchases); 
+        }
+      }
     }
 
-    handleCancel();
-    loadAvailableItems();
+    const updatedCredits = credits.filter(c => c.id !== transaction.id);
+    
+    storage.set(STORAGE_KEYS.CREDITS, updatedCredits);
+    if (transaction.type === 'payment') {
+        storage.set(STORAGE_KEYS.SALES, sales);
+    }
+    
+    setCredits(updatedCredits);
   };
 
-  const handleOpenModal = () => {
-    setLineItems([{ 
-      id: '1', 
-      itemType: 'BN', 
-      customItemName: '', 
-      quantity: '', 
-      pricePerUnit: getSavedPrice('BN')
-    }]);
-    setShowModal(true);
+  const startEditingTransaction = (transaction: ExtendedCreditTransaction) => {
+    setEditingTransactionId(transaction.id);
+    setEditTransAmount(transaction.amount.toString());
+    setEditTransDate(format(new Date(transaction.date), 'yyyy-MM-dd'));
   };
 
-  const handleCancel = () => {
-    setFormData({
-      date: format(new Date(), 'yyyy-MM-dd'),
-      customerName: '',
-      isCredit: false,
-      customerId: '',
-      customerPhone: '',
-    });
-    setCustomerSearchTerm('');
-    setShowModal(false);
-  };
+  const saveEditedTransaction = (originalTransaction: ExtendedCreditTransaction) => {
+    const newAmount = parseFloat(editTransAmount);
+    if (isNaN(newAmount) || newAmount <= 0) {
+      alert('Invalid amount');
+      return;
+    }
 
-  const deleteSale = (id: string) => {
-    if (confirm('Are you sure you want to delete this sale? Inventory will be restored.')) {
-      const sale = sales.find(s => s.id === id);
-      if (!sale) return;
-
-      // Restore inventory
-      const purchases: PurchaseItem[] = storage.get(STORAGE_KEYS.PURCHASES) || [];
-      
-      if (sale.batchesUsed && sale.batchesUsed.length > 0) {
-        for (const batch of sale.batchesUsed) {
-          const purchase = purchases.find(p =>
-            p.batchNumber === batch.batchId &&
-            (sale.itemType === 'OTHER'
-              ? p.customItemName === sale.customItemName
-              : p.itemType === sale.itemType)
-          );
-
-          if (purchase) {
-            purchase.remainingQuantity += batch.quantity;
-          }
-        }
-      } else {
-        const itemMatches = (p: PurchaseItem) => {
-          if (sale.itemType === 'OTHER') {
-            return p.itemType === 'OTHER' && p.customItemName === sale.customItemName;
-          }
-          return p.itemType === sale.itemType;
+    // 1. Update the Local Credit Record
+    const updatedCredits = credits.map(c => {
+      if (c.id === originalTransaction.id) {
+        return {
+          ...c,
+          amount: newAmount,
+          date: new Date(editTransDate)
         };
+      }
+      return c;
+    });
 
-        const sortedPurchases = purchases
-          .filter(itemMatches)
-          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-        if (sortedPurchases.length > 0) {
-          sortedPurchases[0].remainingQuantity += sale.quantity;
+    // 2. Sync with Sales Page
+    const sales = (storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || []) as (Omit<SaleItem, 'paymentStatus'> & { 
+      amountRemaining?: number; 
+      amountPaid?: number; 
+      paymentStatus?: string; 
+    })[];
+    
+    // --- SCENARIO A: EDITING A CREDIT (SALE) ---
+    if (originalTransaction.type === 'credit' && originalTransaction.saleId) {
+      const sale = sales.find(s => s.id === originalTransaction.saleId);
+      if (sale) {
+        const amountPaid = sale.amountPaid || 0;
+        
+        // CHECK 1: Cannot set credit amount less than what's already paid
+        if (newAmount < amountPaid) {
+          alert(`The new credit amount (Rs ${newAmount.toLocaleString('en-PK')}) cannot be less than the amount already paid (Rs ${amountPaid.toLocaleString('en-PK')}).`);
+          setEditingTransactionId(null);
+          return;
+        }
+        
+        sale.totalAmount = newAmount;
+        sale.date = new Date(editTransDate);
+        sale.amountRemaining = newAmount - amountPaid;
+        
+        // Update payment status (Fixed Logic)
+        if (sale.amountRemaining <= 0) {
+            sale.amountRemaining = 0;
+            sale.paymentStatus = 'paid';
+        } else if (amountPaid > 0) {
+            sale.paymentStatus = 'partial';
+        } else {
+            sale.paymentStatus = 'pending';
         }
       }
+    } 
+    // --- SCENARIO B: EDITING A PAYMENT ---
+    else if (originalTransaction.type === 'payment') {
+       
+       const balanceBefore = getBalanceBefore(originalTransaction.id, originalTransaction.customerId, credits);
+       if (newAmount > balanceBefore) {
+            alert(`The new payment amount (Rs ${newAmount.toLocaleString('en-PK')}) cannot exceed the customer's outstanding debt immediately prior to this transaction.`);
+            setEditingTransactionId(null);
+            return;
+       }
 
-      storage.set(STORAGE_KEYS.PURCHASES, purchases);
+       const diff = newAmount - originalTransaction.amount;
+       
+       if (diff !== 0) {
+           // Update Shop Account
+           const accounts: Account[] = storage.get(STORAGE_KEYS.ACCOUNTS) || [];
+           const shopAccount = accounts.find(a => a.type === 'shop');
+           if (shopAccount) {
+             shopAccount.balance += diff;
+             storage.set(STORAGE_KEYS.ACCOUNTS, accounts);
+           }
 
-      if (sale.isCredit) {
-        const credits: CreditTransaction[] = storage.get(STORAGE_KEYS.CREDITS) || [];
-        const updatedCredits = credits.filter(c => c.saleId !== id);
-        storage.set(STORAGE_KEYS.CREDITS, updatedCredits);
-      } else {
-        const accounts: Account[] = storage.get(STORAGE_KEYS.ACCOUNTS) || [];
-        const shopAccount = accounts.find(a => a.type === 'shop');
-        if (shopAccount) {
-          shopAccount.balance -= sale.totalAmount;
-          storage.set(STORAGE_KEYS.ACCOUNTS, accounts);
-        }
-      }
+           // Update Sales Records (Reconciliation)
+           if (diff > 0) {
+             // Added money: Distribute to oldest unpaid
+             const unpaidSales = sales
+                .filter(s => s.customerId === originalTransaction.customerId && s.paymentStatus !== 'paid')
+                .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-      const updatedSales = sales.filter(s => s.id !== id);
-      storage.set(STORAGE_KEYS.SALES, updatedSales);
-      setSales(updatedSales);
-      loadAvailableItems();
+             let moneyDistributing = diff;
+             for (const sale of unpaidSales) {
+                if (moneyDistributing <= 0) break;
+                const remaining = sale.amountRemaining !== undefined ? sale.amountRemaining : sale.totalAmount;
+                const cover = Math.min(remaining, moneyDistributing);
+                
+                sale.amountPaid = (sale.amountPaid || 0) + cover;
+                sale.amountRemaining = remaining - cover;
+                moneyDistributing -= cover;
+
+                if (sale.amountRemaining <= 0) sale.paymentStatus = 'paid';
+                else sale.paymentStatus = 'partial';
+             }
+           } else {
+             // Removed money: Revert from newest paid
+             let moneyToTakeBack = Math.abs(diff);
+             const paidSales = sales
+                .filter(s => s.customerId === originalTransaction.customerId && (s.amountPaid || 0) > 0)
+                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()); // Newest first
+
+             for (const sale of paidSales) {
+                if (moneyToTakeBack <= 0) break;
+                const currentPaid = sale.amountPaid || 0;
+                const revertAmount = Math.min(currentPaid, moneyToTakeBack);
+
+                sale.amountPaid = currentPaid - revertAmount;
+                sale.amountRemaining = (sale.amountRemaining || 0) + revertAmount;
+                moneyToTakeBack -= revertAmount;
+
+                if (sale.amountRemaining === sale.totalAmount) sale.paymentStatus = 'pending';
+                else sale.paymentStatus = 'partial';
+             }
+           }
+       }
+    }
+
+    storage.set(STORAGE_KEYS.SALES, sales);
+    storage.set(STORAGE_KEYS.CREDITS, updatedCredits);
+    setCredits(updatedCredits.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+    setEditingTransactionId(null);
+  };
+
+  // --- Customer Management ---
+
+  const handleEditCustomer = () => {
+    // FIX: Removed !editPhone.trim() check
+    if (!selectedCustomer || !editName.trim()) {
+      alert('Please enter a customer name');
+      return;
+    }
+
+    const updatedCustomers = customers.map(c => 
+      c.id === selectedCustomer.id 
+        ? { ...c, name: editName.trim(), phone: editPhone.trim() }
+        : c
+    );
+
+    // Update names in credits too
+    const updatedCredits = credits.map(c => 
+      c.customerId === selectedCustomer.id 
+        ? { ...c, customerName: editName.trim() }
+        : c
+    );
+
+    // Update names in sales too (Sync Requirement)
+    const sales = storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || [];
+    const updatedSales = sales.map(s => 
+      s.customerId === selectedCustomer.id
+        ? { ...s, customerName: editName.trim() }
+        : s
+    );
+
+    storage.set(STORAGE_KEYS.CUSTOMERS, updatedCustomers);
+    storage.set(STORAGE_KEYS.CREDITS, updatedCredits);
+    storage.set(STORAGE_KEYS.SALES, updatedSales);
+    
+    setCustomers(updatedCustomers);
+    setCredits(updatedCredits);
+    setShowEditModal(false);
+    
+    setSelectedCustomer({
+      ...selectedCustomer,
+      name: editName.trim(),
+      phone: editPhone.trim()
+    });
+  };
+
+  const handleDeleteCustomer = () => {
+    if (!selectedCustomer) return;
+    if (selectedCustomer.pendingAmount > 0) {
+      alert('Cannot delete customer with pending payments. Please clear all payments first.');
+      return;
+    }
+
+    if (confirm(`Delete ${selectedCustomer.name}? This removes all history.`)) {
+      const updatedCustomers = customers.filter(c => c.id !== selectedCustomer.id);
+      const updatedCredits = credits.filter(c => c.customerId !== selectedCustomer.id);
+      
+      storage.set(STORAGE_KEYS.CUSTOMERS, updatedCustomers);
+      storage.set(STORAGE_KEYS.CREDITS, updatedCredits);
+      setCustomers(updatedCustomers);
+      setCredits(updatedCredits);
+      setShowEditModal(false);
+      setSelectedCustomer(null);
     }
   };
 
-  const getTotalAmount = () => lineItems.reduce((sum, item) => {
-    const qty = parseFloat(item.quantity) || 0;
-    const price = parseFloat(item.pricePerUnit) || 0;
-    return sum + qty * price;
-  }, 0);
+  // --- Derived State & Calculations ---
 
-  const totalSalesValue = filteredSales.reduce((sum, s) => sum + s.totalAmount, 0);
-  const cashSales = filteredSales.filter(s => !s.isCredit).reduce((sum, s) => sum + s.totalAmount, 0);
-  const creditSales = filteredSales
-    .filter(s => s.isCredit)
-    .reduce((sum, s) => sum + (s.amountRemaining ?? s.totalAmount), 0);
-  const netSales = cashSales + filteredSales
-    .filter(s => s.isCredit)
-    .reduce((sum, s) => sum + (s.amountPaid ?? 0), 0);
+  const customerSummary = customers.map(customer => {
+    const customerCredits = credits.filter(c => c.customerId === customer.id);
+    
+    const totalDebt = customerCredits
+      .filter(c => c.type === 'credit')
+      .reduce((sum, c) => sum + c.amount, 0);
+      
+    const totalPaid = customerCredits
+      .filter(c => c.type === 'payment')
+      .reduce((sum, c) => sum + c.amount, 0);
 
-  const filteredCustomers = customers.filter(c => 
-    c.name.toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
-    c.phone.includes(customerSearchTerm)
-  );
+    const pendingAmount = totalDebt - totalPaid;
+    
+    const overdueAmount = customerCredits
+      .filter(c => c.type === 'credit' && c.status === 'overdue')
+      .reduce((sum, c) => sum + c.amount, 0);
 
-  const handleMonthChange = (monthsAgo: number) => {
-    const targetDate = subMonths(new Date(), monthsAgo);
-    setDateRange({
-      startDate: format(startOfMonth(targetDate), 'yyyy-MM-dd'),
-      endDate: format(endOfMonth(targetDate), 'yyyy-MM-dd')
+    return {
+      ...customer,
+      pendingAmount: Math.max(0, pendingAmount), 
+      overdueAmount,
+      transactionCount: customerCredits.length
+    };
+  }).filter(c => c.transactionCount > 0);
+
+  const getCustomerHistory = (customerId: string) => {
+    const customerCredits = credits
+      .filter(c => c.customerId === customerId)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    let runningBalance = 0;
+    
+    return customerCredits.map(record => {
+      const isPayment = record.type === 'payment';
+      const amount = record.amount;
+      
+      if (isPayment) {
+        runningBalance -= amount;
+      } else {
+        runningBalance += amount;
+      }
+
+      return {
+        ...record,
+        displayType: isPayment ? 'Payment' : 'Credit',
+        credit: isPayment ? 0 : amount,
+        received: isPayment ? amount : 0,
+        runningBalance: runningBalance
+      };
     });
   };
 
-  const handleYearChange = () => {
-    setDateRange({
-      startDate: format(new Date(new Date().getFullYear(), 0, 1), 'yyyy-MM-dd'),
-      endDate: format(new Date(), 'yyyy-MM-dd')
-    });
-  };
+  const overdueCount = customerSummary.filter(c => c.overdueAmount > 0).length;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4 sm:p-6 md:p-8">
-      <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 animate-in fade-in duration-500">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3 sm:gap-4">
-          <div className="flex flex-col items-center w-full sm:min-w-[200px] sm:w-auto">
-            <p className="text-sm sm:text-base text-gray-900 font-semibold mb-1">Total Sales</p>
-            <div className="bg-white shadow-lg rounded-xl px-4 sm:px-6 py-3 sm:py-4 border border-gray-200 h-[60px] flex items-center justify-center w-full">
-              <p className="text-xl sm:text-2xl font-bold text-blue-600">Rs {totalSalesValue.toLocaleString('en-PK')}</p>
-            </div>
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-800">Credit Management (Udhaar)</h1>
+            <p className="text-slate-500 mt-1">Monitor pending payments and customer history.</p>
           </div>
-
-          <div className="flex flex-col items-center w-full sm:min-w-[200px] sm:w-auto">
-            <p className="text-sm sm:text-base text-gray-900 font-semibold mb-1">Credit Sales</p>
-            <div className="bg-white shadow-lg rounded-xl px-4 sm:px-6 py-3 sm:py-4 border border-gray-200 h-[60px] flex items-center justify-center w-full">
-              <p className="text-xl sm:text-2xl font-bold text-red-600">Rs {creditSales.toLocaleString('en-PK')}</p>
-            </div>
-          </div>
-
-          <div className="flex flex-col items-center w-full sm:min-w-[200px] sm:w-auto">
-            <p className="text-sm sm:text-base text-gray-900 font-semibold mb-1">Net Sales</p>
-            <div className="bg-white shadow-lg rounded-xl px-4 sm:px-6 py-3 sm:py-4 border border-gray-200 h-[60px] flex items-center justify-center w-full">
-              <p className="text-xl sm:text-2xl font-bold text-green-600">Rs {netSales.toLocaleString('en-PK')}</p>
-            </div>
-          </div>  
-          
-          <button
-            onClick={handleOpenModal}
-            className="flex items-center justify-center gap-2 px-4 sm:px-6 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-200 h-[60px] w-full sm:min-w-[180px] sm:w-auto"
-          >
-            <Plus className="w-5 h-5" />
-            <span>Add Sale</span>
-          </button>
-          
-          <button
-            onClick={() => setShowPriceModal(true)}
-            className="flex items-center justify-center gap-2 px-4 sm:px-6 bg-gradient-to-r from-green-600 to-green-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl hover:from-green-700 hover:to-green-800 transition-all duration-200 h-[60px] w-full sm:min-w-[180px] sm:w-auto"
-          >
-            <span>Manage Prices</span>
-          </button>
-        </div>
-
-        {/* Sale Modal */}
-        {showModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6">
-            <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl w-full max-w-5xl max-h-[85vh] sm:max-h-[90vh] overflow-hidden flex flex-col">
-              {/* Modal Header */}
-              <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-4 sm:px-6 py-4 sm:py-5 flex justify-between items-center">
-                <div>
-                  <h2 className="text-xl sm:text-2xl font-bold text-white">Add New Sale</h2>
-                  <p className="text-blue-100 text-xs sm:text-sm mt-1">Enter sale details below</p>
-                </div>
-                <button 
-                  onClick={handleCancel} 
-                  className="text-white hover:bg-white/20 rounded-lg p-2 transition-colors"
-                >
-                  <X className="w-5 h-5 sm:w-6 sm:h-6" />
-                </button>
-              </div>
-
-              {/* Modal Body */}
-              <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto">
-                <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-                  {/* Date & Credit Toggle */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-                    <div>
-                      <label className="block text-xs sm:text-sm font-semibold text-gray-700 mb-2">Sale Date *</label>
-                      <input
-                        type="date"
-                        value={formData.date}
-                        onChange={e => setFormData({ ...formData, date: e.target.value })}
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border-2 border-gray-200 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                        required
-                      />
-                    </div>
-                    
-                    <div>
-                      <label className="block text-xs sm:text-sm font-semibold text-gray-700 mb-2">Payment Type *</label>
-                      <select
-                        value={formData.isCredit ? 'credit' : 'cash'}
-                        onChange={(e) => setFormData({ ...formData, isCredit: e.target.value === 'credit' })}
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border-2 border-gray-200 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                        required
-                      >
-                        <option value="cash">Cash Sale</option>
-                        <option value="credit">Credit Sale (Udhaar)</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* Credit Customer Section */}
-                  {formData.isCredit && (
-                    <div className="border-t-2 border-gray-200 pt-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-                        {/* Left Column - Customer Selection */}
-                        <div className="p-4 bg-orange-50 rounded-xl border-2 border-orange-200">
-                          <div className="flex items-center justify-between mb-3">
-                            <h3 className="text-sm sm:text-base font-bold text-gray-900">Customer Selection</h3>
-                          </div>
-                          
-                          <div>
-                            <label className="block text-xs font-semibold text-gray-700 mb-2">Select Existing Customer</label>
-                            <div className="flex gap-2">
-                              <div className="relative flex-1">
-                                <select
-                                  value={formData.customerId}
-                                  onChange={(e) => {
-                                    const selectedCustomer = customers.find(c => c.id === e.target.value);
-                                    if (selectedCustomer) {
-                                      setFormData({
-                                        ...formData,
-                                        customerId: selectedCustomer.id,
-                                        customerName: selectedCustomer.name,
-                                        customerPhone: selectedCustomer.phone,
-                                      });
-                                    } else {
-                                      setFormData({
-                                        ...formData,
-                                        customerId: '',
-                                        customerName: '',
-                                        customerPhone: '',
-                                      });
-                                    }
-                                  }}
-                                  className="w-full px-3 py-2 sm:py-2.5 text-xs sm:text-sm border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white"
-                                >
-                                  <option value="">Select a customer...</option>
-                                  {customers.map(c => (
-                                    <option key={c.id} value={c.id}>
-                                      {c.name} - {c.phone}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                              
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const isShowing = document.getElementById('new-customer-form')?.style.display !== 'none';
-                                  const form = document.getElementById('new-customer-form');
-                                  if (form) {
-                                    form.style.display = isShowing ? 'none' : 'block';
-                                  }
-                                  if (!isShowing) {
-                                    setFormData({
-                                      ...formData,
-                                      customerId: '',
-                                      customerName: '',
-                                      customerPhone: '',
-                                    });
-                                  }
-                                }}
-                                className="flex items-center justify-center px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                                title="Add new customer"
-                              >
-                                <Plus className="w-5 h-5" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Right Column - New Customer Form */}
-                        <div id="new-customer-form" style={{ display: 'none' }} className="p-4 bg-orange-50 rounded-xl border-2 border-orange-200">
-                          <div className="flex items-center justify-between mb-3">
-                            <h3 className="text-sm sm:text-base font-bold text-gray-900">New Customer</h3>
-                          </div>
-                          
-                          <div className="space-y-3">
-                            <div>
-                              <label className="block text-xs font-semibold text-gray-700 mb-2">Customer Name *</label>
-                              <input
-                                type="text"
-                                value={formData.customerName}
-                                onChange={(e) => setFormData({ ...formData, customerName: e.target.value })}
-                                placeholder="Enter customer name"
-                                className="w-full px-3 py-2 sm:py-2.5 text-xs sm:text-sm border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                                required={formData.isCredit && !formData.customerId}
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-xs font-semibold text-gray-700 mb-2">Phone Number</label>
-                              <input
-                                type="tel"
-                                value={formData.customerPhone}
-                                onChange={(e) => setFormData({ ...formData, customerPhone: e.target.value })}
-                                placeholder="Enter phone number"
-                                className="w-full px-3 py-2 sm:py-2.5 text-xs sm:text-sm border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Items Section */}
-                  <div className="border-t-2 border-gray-200 pt-4 sm:pt-6">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
-                      <h3 className="text-base sm:text-lg font-bold text-gray-900">Sale Items</h3>
-                      <button
-                        type="button"
-                        onClick={addLineItem}
-                        className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white text-xs sm:text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors shadow-md w-full sm:w-auto justify-center">
-                        <Plus className="w-4 h-4" />
-                        Add Item
-                      </button>
-                    </div>
-                    <div className="space-y-3">
-                      {lineItems.map((line, index) => (
-                        <div key={line.id} className="bg-gradient-to-br from-gray-50 to-gray-100 p-3 sm:p-4 rounded-lg sm:rounded-xl border-2 border-gray-200 hover:border-blue-300 transition-all">
-                          <div className="grid grid-cols-12 gap-2 sm:gap-3 items-end">
-                            {/* Item Type/Name */}
-                            <div className="col-span-12 sm:col-span-3">
-                              <label className="block text-xs font-semibold text-gray-600 mb-1">Item</label>
-                              <select 
-                                value={line.itemType === 'OTHER' ? line.customItemName : line.itemType}
-                                onChange={(e) => handleItemSelect(line.id, e.target.value)}
-                                className="w-full px-2 sm:px-3 py-2 sm:py-2.5 text-xs sm:text-sm border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white font-medium"
-                                required
-                              >
-                                <option value="">Select Item</option>
-                                {availableItems.map(item => (
-                                  <option key={item} value={item}>{item}</option>
-                                ))}
-                              </select>
-                            </div>
-                            {/* Quantity */}
-                            <div className="col-span-6 sm:col-span-3">
-                              <label className="block text-xs font-semibold text-gray-600 mb-1">Quantity</label>
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={line.quantity}
-                                onChange={e => updateLineItem(line.id, 'quantity', e.target.value)}
-                                placeholder="0"
-                                className="w-full px-2 sm:px-3 py-2 sm:py-2.5 text-xs sm:text-sm border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-medium"
-                                required
-                              />
-                            </div>
-
-                            {/* Price per Unit */}
-                            <div className="col-span-6 sm:col-span-3">
-                              <label className="block text-xs font-semibold text-gray-600 mb-1">Price/Unit</label>
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={line.pricePerUnit}
-                                onChange={e => updateLineItem(line.id, 'pricePerUnit', e.target.value)}
-                                placeholder="0.00"
-                                className="w-full px-2 sm:px-3 py-2 sm:py-2.5 text-xs sm:text-sm border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-medium"
-                                required
-                              />
-                            </div>
-
-                            {/* Total */}
-                            <div className="col-span-10 sm:col-span-2">
-                              <label className="block text-xs font-semibold text-gray-600 mb-1">Total</label>
-                              <div className="px-2 sm:px-3 py-2 sm:py-2.5 bg-blue-50 border-2 border-blue-200 rounded-lg text-center">
-                                <span className="text-xs sm:text-sm font-bold text-blue-700">
-                                  {((parseFloat(line.quantity) || 0) * (parseFloat(line.pricePerUnit) || 0)).toLocaleString('en-PK', { maximumFractionDigits: 0 })}
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Delete Button */}
-                            <div className="col-span-2 sm:col-span-1 flex items-end justify-center">
-                              <button
-                                type="button"
-                                onClick={() => removeLineItem(line.id)}
-                                disabled={lineItems.length === 1}
-                                className={`p-2 sm:p-2.5 rounded-lg transition-all ${
-                                  lineItems.length === 1 
-                                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                                    : 'bg-red-50 text-red-600 hover:bg-red-100'
-                                }`}
-                                title={lineItems.length === 1 ? 'Cannot remove last item' : 'Remove item'}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Modal Footer */}
-                <div className="sticky bottom-0 bg-white border-t-2 border-gray-200 px-4 sm:px-6 py-4 sm:py-5">
-                  <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-                    <div className="text-center sm:text-left w-full sm:w-auto">
-                      <p className="text-xs sm:text-sm text-gray-500 font-medium mb-1">Grand Total</p>
-                      <p className="text-2xl sm:text-3xl md:text-4xl font-bold text-blue-600">
-                        Rs {getTotalAmount().toLocaleString('en-PK')}
-                      </p>
-                    </div>
-                    <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-                      <button
-                        type="button"
-                        onClick={handleCancel}
-                        className="w-full sm:w-auto px-6 sm:px-8 py-3 border-2 border-gray-300 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        className="w-full sm:w-auto px-6 sm:px-8 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl hover:from-blue-700 hover:to-blue-800 transition-all"
-                      >
-                        Save Sale
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* Price Management Modal */}
-        {showPriceModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6">
-            <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] sm:max-h-[90vh] overflow-hidden flex flex-col">
-              {/* Modal Header */}
-              <div className="bg-gradient-to-r from-green-600 to-green-700 px-4 sm:px-6 py-4 sm:py-5 flex justify-between items-center">
-                <div>
-                  <h2 className="text-xl sm:text-2xl font-bold text-white">Manage Item Prices</h2>
-                  <p className="text-green-100 text-xs sm:text-sm mt-1">Set default prices for items</p>
-                </div>
-                <button 
-                  onClick={() => setShowPriceModal(false)} 
-                  className="text-white hover:bg-white/20 rounded-lg p-2 transition-colors"
-                >
-                  <X className="w-5 h-5 sm:w-6 sm:h-6" />
-                </button>
-              </div>
-
-              {/* Modal Body */}
-              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
-                {/* Add/Update Price Form */}
-                <form onSubmit={handleSavePrice} className="bg-gradient-to-br from-green-50 to-green-100 p-4 rounded-xl border-2 border-green-200">
-                  <h3 className="text-base sm:text-lg font-bold text-gray-900 mb-4">Add/Update Price</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs sm:text-sm font-semibold text-gray-700 mb-2">Item Name *</label>
-                      <select
-                        value={priceFormData.itemName}
-                        onChange={(e) => {
-                          const itemName = e.target.value;
-                          const existingPrice = itemPrices.find(p => p.itemName === itemName);
-                          setPriceFormData({
-                            itemName,
-                            price: existingPrice ? existingPrice.price.toString() : ''
-                          });
-                        }}
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                        required
-                      >
-                        <option value="">Select an item...</option>
-                        {availableItems.map(item => (
-                          <option key={item} value={item}>{item}</option>
-                        ))}
-                      </select>
-                    </div>
-                    
-                    <div>
-                      <label className="block text-xs sm:text-sm font-semibold text-gray-700 mb-2">Price per Unit *</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={priceFormData.price}
-                        onChange={(e) => setPriceFormData({ ...priceFormData, price: e.target.value })}
-                        placeholder="Enter price"
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                        required
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="mt-4 flex justify-end">
-                    <button
-                      type="submit"
-                      className="px-6 py-2 bg-gradient-to-r from-green-600 to-green-700 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl hover:from-green-700 hover:to-green-800 transition-all"
-                    >
-                      Save Price
-                    </button>
-                  </div>
-                </form>
-
-                {/* Saved Prices List */}
-                <div>
-                  <h3 className="text-base sm:text-lg font-bold text-gray-900 mb-4">Saved Prices</h3>
-                  {itemPrices.length === 0 ? (
-                    <div className="text-center py-8 text-gray-400">
-                      <p className="text-sm">No prices saved yet</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {itemPrices.map((price) => (
-                        <div key={price.itemName} className="flex items-center justify-between bg-white p-4 rounded-lg border-2 border-gray-200 hover:border-green-300 transition-all">
-                          <div>
-                            <p className="font-semibold text-gray-900">{price.itemName}</p>
-                            <p className="text-sm text-gray-600">Rs {price.price.toLocaleString('en-PK')}</p>
-                          </div>
-                          <button
-                            onClick={() => handleDeletePrice(price.itemName)}
-                            className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition-colors"
-                            title="Delete price"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Modal Footer */}
-              <div className="sticky bottom-0 bg-white border-t-2 border-gray-200 px-4 sm:px-6 py-4">
-                <button
-                  type="button"
-                  onClick={() => setShowPriceModal(false)}
-                  className="w-full px-6 py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200 transition-colors"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Sales History Table */}
-        <div className="bg-white shadow-xl rounded-xl sm:rounded-2xl overflow-hidden border border-gray-200">
-          <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-            <div>
-              <h2 className="text-lg sm:text-xl font-bold text-gray-900">Sales History</h2>
-              <p className="text-xs sm:text-sm text-gray-600 mt-1">View all your sales records</p>
-            </div>
-            
-            {/* Date Range Filter */}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowDateFilter(!showDateFilter)}
-                className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white text-xs sm:text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                <Calendar className="w-4 h-4" />
-                <span>Filter by Date</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Date Filter Panel */}
-          {showDateFilter && (
-            <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">Start Date</label>
-                  <input
-                    type="date"
-                    value={dateRange.startDate}
-                    onChange={(e) => setDateRange({ ...dateRange, startDate: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">End Date</label>
-                  <input
-                    type="date"
-                    value={dateRange.endDate}
-                    onChange={(e) => setDateRange({ ...dateRange, endDate: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-              </div>
-              <div className="mt-3 flex justify-end gap-2">
-                <select
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    if (value === 'year') {
-                      handleYearChange();
-                    } else {
-                      const monthIndex = parseInt(value);
-                      const currentMonth = new Date().getMonth();
-                      const currentYear = new Date().getFullYear();
-                      const targetYear = monthIndex > currentMonth ? currentYear - 1 : currentYear;
-                      setDateRange({
-                        startDate: format(new Date(targetYear, monthIndex, 1), 'yyyy-MM-dd'),
-                        endDate: format(endOfMonth(new Date(targetYear, monthIndex, 1)), 'yyyy-MM-dd')
-                      });
-                    }
-                  }}
-                  className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <option value="">Select Period</option>
-                  <option value="0">Jan</option>
-                  <option value="1">Feb</option>
-                  <option value="2">Mar</option>
-                  <option value="3">Apr</option>
-                  <option value="4">May</option>
-                  <option value="5">Jun</option>
-                  <option value="6">Jul</option>
-                  <option value="7">Aug</option>
-                  <option value="8">Sep</option>
-                  <option value="9">Oct</option>
-                  <option value="10">Nov</option>
-                  <option value="11">Dec</option>
-                  <option value="year">YEAR</option>
-                </select>
-              </div>
+          {overdueCount > 0 && (
+            <div className="bg-red-50 text-red-700 px-4 py-2.5 rounded-lg flex items-center gap-2 border border-red-200 shadow-sm">
+              <AlertTriangle className="w-5 h-5" />
+              <span className="font-semibold text-sm">Action Needed: {overdueCount} Overdue Customer{overdueCount > 1 ? 's' : ''}</span>
             </div>
           )}
-          
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Date</th>
-                  <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Item</th>
-                  <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">
-                    <div className="flex items-center gap-2">
-                      <Search className="w-4 h-4" />
-                      <input
-                        type="text"
-                        placeholder="Customer"
-                        value={customerFilter}
-                        onChange={(e) => setCustomerFilter(e.target.value)}
-                        className="bg-transparent border-b border-gray-400 focus:border-blue-600 outline-none text-xs font-bold uppercase tracking-wider w-24"
-                      />
-                    </div>
-                  </th>
-                  <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Qty</th>
-                  <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Price/Unit</th>
-                  <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Total</th>
-                  <th className="px-3 sm:px-6 py-3 sm:py-4 text-center text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Type</th>
-                  <th className="px-3 sm:px-6 py-3 sm:py-4 text-center text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {filteredSales.filter(s => !customerFilter || (s.customerName?.toLowerCase().includes(customerFilter.toLowerCase()))).length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="px-4 sm:px-6 py-8 sm:py-12 text-center">
-                      <div className="flex flex-col items-center justify-center text-gray-400">
-                        <Plus className="w-12 h-12 sm:w-16 sm:h-16 mb-3 sm:mb-4 opacity-20" />
-                        <p className="text-base sm:text-lg font-semibold">No sales recorded yet</p>
-                        <p className="text-xs sm:text-sm mt-1">Click &quot;Add Sale&quot; to get started</p>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  filteredSales
-                    .filter(s => !customerFilter || (s.customerName?.toLowerCase().includes(customerFilter.toLowerCase())))
-                    .map(s => (
-                      <tr key={s.id} className="hover:bg-blue-50 transition-colors">
-                        <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900">
-                          {format(new Date(s.date), 'MMM dd, yyyy')}
-                        </td>
-                        <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
-                          <span className="text-xs sm:text-sm font-semibold text-gray-900">
-                            {s.itemType === 'OTHER' ? s.customItemName : s.itemType}
-                          </span>
-                        </td>
-                        <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm text-gray-600">
-                          {s.customerName || '-'}
-                        </td>
-                        <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm text-right font-medium text-gray-900">
-                          {s.quantity}
-                        </td>
-                        <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm text-right text-gray-900">
-                          Rs {s.pricePerUnit.toLocaleString('en-PK')}
-                        </td>
-                        <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm text-right font-bold text-gray-900">
-                          Rs {s.totalAmount.toLocaleString('en-PK')}
-                        </td>
-                        <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-center">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            !s.isCredit 
-                              ? 'bg-green-100 text-green-800' 
-                              : (s.amountRemaining ?? s.totalAmount) === 0 
-                                ? 'bg-blue-100 text-blue-800'
-                                : (s.amountPaid ?? 0) > 0
-                                  ? 'bg-yellow-100 text-yellow-800'
-                                  : 'bg-orange-100 text-orange-800'
-                          }`}>
-                            {!s.isCredit 
-                              ? 'Cash' 
-                              : (s.amountRemaining ?? s.totalAmount) === 0 
-                                ? 'Credit Paid'
-                                : (s.amountPaid ?? 0) > 0
-                                  ? 'Partial Paid'
-                                  : 'Credit'}
-                          </span>
-                        </td>
-                        <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-center">
-                          <button
-                            onClick={() => deleteSale(s.id)}
-                            className="inline-flex items-center justify-center p-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition-colors"
-                            title="Delete sale"
-                          >
-                            <Trash2 className="w-3 h-3 sm:w-4 sm:h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                )}
-              </tbody>
-            </table>
+        </div>
+
+        {/* Search and Filter */}
+        <div className="flex flex-col sm:flex-row gap-4 mb-6">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-5 h-5" />
+            <input
+              type="text"
+              placeholder="Search customer by name or phone..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-3 bg-white border border-slate-300 text-slate-900 placeholder-slate-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm transition-all"
+            />
           </div>
+          <button
+            onClick={() => setFilter(filter === 'overdue' ? 'all' : 'overdue')}
+            className={`px-6 py-3 rounded-lg font-medium transition-all shadow-sm whitespace-nowrap ${
+              filter === 'overdue'
+                ? 'bg-red-600 text-white hover:bg-red-700'
+                : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50'
+            }`}
+          >
+            {filter === 'overdue' ? 'Show All' : 'Filter Overdue'}
+          </button>
+        </div>
+
+        {/* Customer Cards */}
+        <div className="grid grid-cols-1 gap-4">
+          {customerSummary
+            .filter(customer => {
+              const matchesSearch = customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                   customer.phone.includes(searchTerm);
+              const matchesFilter = filter === 'all' || 
+                                   (filter === 'overdue' && customer.overdueAmount > 0);
+              return matchesSearch && matchesFilter;
+            })
+            .map(customer => {
+              const isOverdue = customer.overdueAmount > 0;
+              
+              const lastPayment = credits
+                .filter(c => c.customerId === customer.id && c.type === 'payment')
+                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+              
+              const lastPaymentDays = lastPayment 
+                ? differenceInDays(new Date(), new Date(lastPayment.date))
+                : null;
+
+              return (
+                <div
+                  key={customer.id}
+                  className={`bg-white rounded-lg shadow-sm hover:shadow-md transition-all p-6 border-l-4 ${
+                    isOverdue ? 'border-l-red-500 bg-red-50/10' : 'border-l-blue-500'
+                  }`}
+                >
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <button
+                          onClick={() => {
+                            setSelectedCustomer(customer);
+                            setEditName(customer.name);
+                            setEditPhone(customer.phone);
+                            setShowEditModal(true);
+                          }}
+                          className="text-slate-400 hover:text-blue-600 transition-colors"
+                          title="Edit Customer Details"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <h3 className="text-lg font-bold text-slate-800">{customer.name}</h3>
+                        {isOverdue && (
+                          <span className="bg-red-100 text-red-700 text-xs px-2 py-0.5 rounded-full font-bold uppercase tracking-wide">
+                            Overdue
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-4 text-sm text-slate-500">
+                        <span className="flex items-center gap-1">
+                          <Phone className="w-4 h-4" />
+                          {customer.phone || 'No Phone'}
+                        </span>
+                        <span className="hidden sm:inline">•</span>
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-4 h-4" />
+                          {lastPayment 
+                            ? `Last Payment: ${format(new Date(lastPayment.date), 'dd/MM/yyyy')} (${lastPaymentDays} days ago)`
+                            : 'No payments received yet'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-6 w-full md:w-auto justify-between md:justify-end">
+                      <div className="text-right">
+                        <p className="text-xs text-slate-500 uppercase font-semibold mb-1">Pending Balance</p>
+                        <p className={`text-2xl font-bold ${
+                          customer.pendingAmount > 0 ? 'text-slate-800' : 'text-green-600'
+                        }`}>
+                          Rs {customer.pendingAmount.toLocaleString('en-PK')}
+                        </p>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            setSelectedCustomer(customer);
+                            setShowHistoryModal(true);
+                          }}
+                          className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
+                          title="View History"
+                        >
+                          <History className="w-5 h-5" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSelectedCustomer(customer);
+                            setPaymentDate(format(new Date(), 'yyyy-MM-dd'));
+                            setShowPaymentModal(true);
+                          }}
+                          disabled={customer.pendingAmount <= 0}
+                          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
+                            customer.pendingAmount <= 0
+                              ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                              : isOverdue 
+                              ? 'bg-red-600 hover:bg-red-700 text-white'
+                              : 'bg-blue-600 hover:bg-blue-700 text-white'
+                          }`}
+                        >
+                          <Wallet className="w-4 h-4" />
+                          <span>Receive</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          
+          {customerSummary.length === 0 && (
+            <div className="bg-white rounded-lg shadow-sm p-12 text-center">
+              <User className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-slate-800 mb-2">No customers found</h3>
+              <p className="text-slate-500">
+                Try adjusting your search or filters.
+              </p>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* History Modal */}
+      {showHistoryModal && selectedCustomer && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[85vh] overflow-hidden flex flex-col">
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-5 flex items-center justify-between shrink-0">
+              <div>
+                <h2 className="text-2xl font-bold">{selectedCustomer.name}</h2>
+                <p className="text-blue-100 text-sm mt-1">Transaction History</p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowHistoryModal(false);
+                  setEditingTransactionId(null);
+                }}
+                className="p-2 hover:bg-white/20 rounded-lg transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto">
+              <div className="bg-blue-50 rounded-xl p-5 mb-6 border border-blue-100 flex justify-between items-center">
+                <div>
+                  <p className="text-sm text-slate-600 mb-1">Current Pending Balance</p>
+                  <p className="text-3xl font-bold text-blue-600">Rs {selectedCustomer.pendingAmount.toLocaleString('en-PK')}</p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="min-w-full">
+                  <thead>
+                    <tr className="border-b-2 border-slate-200">
+                      <th className="text-left py-3 px-4 text-xs font-semibold text-slate-600 uppercase">Date</th>
+                      <th className="text-right py-3 px-4 text-xs font-semibold text-slate-600 uppercase">Debt (Credit)</th>
+                      <th className="text-right py-3 px-4 text-xs font-semibold text-slate-600 uppercase">Payment (Received)</th>
+                      <th className="text-right py-3 px-4 text-xs font-semibold text-slate-600 uppercase">Balance</th>
+                      <th className="text-center py-3 px-4 text-xs font-semibold text-slate-600 uppercase">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {getCustomerHistory(selectedCustomer.id).map((record, index) => (
+                      <tr key={record.id || index} className="hover:bg-slate-50 transition-colors group">
+                        <td className="py-4 px-4 text-sm text-slate-800 font-medium">
+                          {editingTransactionId === record.id ? (
+                            <input 
+                              type="date" 
+                              value={editTransDate}
+                              onChange={(e) => setEditTransDate(e.target.value)}
+                              className="border rounded p-1 text-sm w-32"
+                            />
+                          ) : (
+                            format(new Date(record.date), 'dd MMM yyyy')
+                          )}
+                        </td>
+                        <td className="py-4 px-4 text-sm text-right">
+                          {record.credit > 0 ? (
+                            editingTransactionId === record.id ? (
+                              <input 
+                                type="number" 
+                                value={editTransAmount}
+                                onChange={(e) => setEditTransAmount(e.target.value)}
+                                className="border rounded p-1 text-sm w-24 text-right"
+                              />
+                            ) : (
+                              <span className="text-red-600 font-semibold">Rs {record.credit.toLocaleString('en-PK')}</span>
+                            )
+                          ) : (
+                            <span className="text-slate-300">-</span>
+                          )}
+                        </td>
+                        <td className="py-4 px-4 text-sm text-right">
+                          {record.received > 0 ? (
+                             editingTransactionId === record.id ? (
+                              <input 
+                                type="number" 
+                                value={editTransAmount}
+                                onChange={(e) => setEditTransAmount(e.target.value)}
+                                className="border rounded p-1 text-sm w-24 text-right"
+                              />
+                            ) : (
+                              <span className="text-green-600 font-semibold">Rs {record.received.toLocaleString('en-PK')}</span>
+                            )
+                          ) : (
+                            <span className="text-slate-300">-</span>
+                          )}
+                        </td>
+                        <td className="py-4 px-4 text-sm text-right font-bold text-slate-800">
+                          Rs {record.runningBalance.toLocaleString('en-PK')}
+                        </td>
+                        <td className="py-4 px-4 text-center">
+                          <div className="flex items-center justify-center gap-2"> 
+                            {editingTransactionId === record.id ? (
+                              <button 
+                                onClick={() => saveEditedTransaction(record)}
+                                className="p-1.5 bg-green-100 text-green-700 rounded hover:bg-green-200"
+                              >
+                                <Save className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <button 
+                                onClick={() => startEditingTransaction(record)}
+                                className="p-1.5 bg-slate-100 text-slate-600 rounded hover:bg-blue-100 hover:text-blue-600"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                            )}
+                            
+                            <button 
+                              onClick={() => handleDeleteTransaction(record)}
+                              className="p-1.5 bg-slate-100 text-slate-600 rounded hover:bg-red-100 hover:text-red-600"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Modal */}
+      {showPaymentModal && selectedCustomer && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-5 rounded-t-2xl">
+              <h2 className="text-2xl font-bold">Receive Payment</h2>
+              <p className="text-blue-100 text-sm mt-1">Enter payment details below</p>
+            </div>
+            
+            <div className="p-6">
+              <div className="mb-5">
+                <p className="text-sm text-slate-500 mb-1">Customer</p>
+                <p className="text-lg font-semibold text-slate-800">{selectedCustomer.name}</p>
+              </div>
+
+              <div className="mb-5 bg-red-50 rounded-lg p-4 border border-red-100">
+                <p className="text-sm text-slate-600 mb-1">Pending Balance</p>
+                <p className="text-2xl font-bold text-red-600">Rs {selectedCustomer.pendingAmount.toLocaleString('en-PK')}</p>
+              </div>
+
+              <div className="mb-5">
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                  Payment Amount
+                </label>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-600 font-medium">Rs</span>
+                  <input
+                    type="number"
+                    value={paymentAmount}
+                    onChange={(e) => setPaymentAmount(e.target.value)}
+                    placeholder="0"
+                    className="w-full pl-12 pr-4 py-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg transition-all"
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                  Payment Date
+                </label>
+                <input
+                  type="date"
+                  value={paymentDate}
+                  onChange={(e) => setPaymentDate(e.target.value)}
+                  className="w-full px-4 py-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                />
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowPaymentModal(false);
+                    setPaymentAmount('');
+                    setPaymentDate(format(new Date(), 'yyyy-MM-dd'));
+                  }}
+                  className="flex-1 px-4 py-3 bg-white border-2 border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition-all font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleReceivePayment}
+                  className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all font-medium shadow-lg shadow-blue-500/30"
+                >
+                  Confirm
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Customer Modal */}
+      {showEditModal && selectedCustomer && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-5 rounded-t-2xl">
+              <h2 className="text-2xl font-bold">Edit Customer</h2>
+            </div>
+            
+            <div className="p-6">
+              <div className="mb-5">
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                  Customer Name
+                </label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full px-4 py-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                />
+              </div>
+
+              <div className="mb-6">
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                  Phone Number <span className="text-slate-400 text-xs font-normal">(Optional)</span>
+                </label>
+                <input
+                  type="tel"
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
+                  placeholder="Optional"
+                  className="w-full px-4 py-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                />
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={handleDeleteCustomer}
+                  className="px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all font-medium"
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={() => {
+                    setShowEditModal(false);
+                  }}
+                  className="flex-1 px-4 py-3 bg-white border-2 border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition-all font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleEditCustomer}
+                  className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all font-medium shadow-lg shadow-blue-500/30"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
