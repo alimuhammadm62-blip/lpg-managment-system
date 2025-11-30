@@ -131,8 +131,8 @@ export default function CreditPage() {
     };
 
     // 2. Update Sales Data (Sync with Sales Page)
-    // FIX: Cast sales to include the optional payment fields to satisfy TypeScript
-    const sales = (storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || []) as (SaleItem & { 
+    // FIX: Use Omit to unbind strict paymentStatus so we can allow 'partial'
+    const sales = (storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || []) as (Omit<SaleItem, 'paymentStatus'> & { 
       amountRemaining?: number; 
       amountPaid?: number; 
       paymentStatus?: string; 
@@ -183,13 +183,17 @@ export default function CreditPage() {
     setPaymentAmount('');
     setSelectedCustomer(null);
   };
-
   // --- Transaction Management (Edit/Delete in History) ---
 
   const handleDeleteTransaction = (transaction: ExtendedCreditTransaction) => {
     if (!confirm('Are you sure you want to delete this transaction? This will update Sales and Inventory.')) return;
 
-    const sales = storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || [];
+    // FIX: Cast sales with Omit to allow 'partial' status updates
+    const sales = (storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || []) as (Omit<SaleItem, 'paymentStatus'> & { 
+      amountRemaining?: number; 
+      amountPaid?: number; 
+      paymentStatus?: string; 
+    })[];
     const purchases = storage.get<PurchaseItem[]>(STORAGE_KEYS.PURCHASES) || [];
 
     if (transaction.type === 'payment') {
@@ -227,7 +231,6 @@ export default function CreditPage() {
 
     } else {
       // --- LOGIC FOR DELETING A CREDIT (THE SALE ITSELF) ---
-      // This means we are deleting the debt, so we must delete the sale and restore inventory.
       if (transaction.saleId) {
         const saleToDelete = sales.find(s => s.id === transaction.saleId);
         
@@ -260,6 +263,8 @@ export default function CreditPage() {
           }
 
           // 2. Remove the Sale from Sales list
+          // We must filter the original array, but 'sales' here is our casted version. 
+          // Since it's a reference, we can filter it.
           const updatedSales = sales.filter(s => s.id !== transaction.saleId);
           storage.set(STORAGE_KEYS.SALES, updatedSales);
           storage.set(STORAGE_KEYS.PURCHASES, purchases); // Save restored inventory
@@ -305,7 +310,12 @@ export default function CreditPage() {
     });
 
     // 2. Sync with Sales Page
-    const sales = storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || [];
+    // FIX: Cast sales with Omit to allow 'partial' status
+    const sales = (storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || []) as (Omit<SaleItem, 'paymentStatus'> & { 
+      amountRemaining?: number; 
+      amountPaid?: number; 
+      paymentStatus?: string; 
+    })[];
     
     if (originalTransaction.type === 'credit' && originalTransaction.saleId) {
       // Find the specific sale and update it
