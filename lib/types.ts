@@ -2,6 +2,11 @@
 
 export type ItemType = 'BN' | 'SN' | 'C' | 'BNS' | 'SNS' | 'CS' | 'ABN' | 'ASN' | 'OTHER';
 
+export interface ItemPrice {
+  itemName: string;
+  price: number;
+}
+
 export interface PurchaseItem {
   id: string;
   date: Date;

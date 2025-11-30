@@ -39,7 +39,8 @@ export const STORAGE_KEYS = {
   CREDITS: 'lpg_credits',
   ACCOUNTS: 'lpg_accounts',
   TRANSACTIONS: 'lpg_transactions',
-  CUSTOM_ITEMS: 'lpg_custom_items'
+  CUSTOM_ITEMS: 'lpg_custom_items',
+  ITEM_PRICES: 'item_prices',
 };
 
 // Initialize default accounts

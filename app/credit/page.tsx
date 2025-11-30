@@ -1,24 +1,41 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Search, AlertTriangle, CheckCircle, Clock, User, X, Calendar, Edit2, Phone, Wallet, History } from 'lucide-react';
+import { Search, AlertTriangle, Wallet, History, User, X, Edit2, Trash2, Phone, Calendar, Save } from 'lucide-react';
 import { storage, STORAGE_KEYS } from '@/lib/storage';
-import type { CreditTransaction, Customer, Account } from '@/lib/types';
+import type { CreditTransaction, Customer, Account, SaleItem, PurchaseItem } from '@/lib/types';
 import { format, differenceInDays } from 'date-fns';
 
+// Extend the type locally to support the new 'payment' type distinction
+interface ExtendedCreditTransaction extends CreditTransaction {
+  type?: 'credit' | 'payment'; 
+}
+
 export default function CreditPage() {
-  const [credits, setCredits] = useState<CreditTransaction[]>([]);
+  const [credits, setCredits] = useState<ExtendedCreditTransaction[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState<'all' | 'overdue'>('all');
+  
+  // Modals
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [selectedCustomer, setSelectedCustomer] = useState<typeof customerSummary[0] | null>(null);
+  
+  // Selection & Form Data
+  const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
   const [paymentAmount, setPaymentAmount] = useState('');
+  // FIXED: Added useState wrapper here
   const [paymentDate, setPaymentDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  
+  // Customer Edit Data
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
+
+  // Transaction Edit Data (Inside History Modal)
+  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
+  const [editTransAmount, setEditTransAmount] = useState('');
+  const [editTransDate, setEditTransDate] = useState('');
 
   useEffect(() => {
     loadCredits();
@@ -26,11 +43,17 @@ export default function CreditPage() {
   }, []);
 
   const loadCredits = () => {
-    const data = storage.get<CreditTransaction[]>(STORAGE_KEYS.CREDITS) || [];
+    const data = storage.get<ExtendedCreditTransaction[]>(STORAGE_KEYS.CREDITS) || [];
+    // Ensure all legacy data defaults to 'credit' type if missing
+    const normalizedData = data.map(c => ({
+      ...c,
+      type: c.type || 'credit' as const
+    }));
     
+    // Check for overdue status on credits
     const today = new Date();
-    data.forEach(credit => {
-      if (credit.status === 'pending') {
+    normalizedData.forEach(credit => {
+      if (credit.type === 'credit' && credit.status === 'pending') {
         const daysPending = differenceInDays(today, new Date(credit.date));
         if (daysPending > 45) {
           credit.status = 'overdue';
@@ -38,14 +61,45 @@ export default function CreditPage() {
       }
     });
 
-    storage.set(STORAGE_KEYS.CREDITS, data);
-    setCredits(data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+    setCredits(normalizedData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
   };
 
   const loadCustomers = () => {
     const data = storage.get<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
     setCustomers(data);
   };
+
+  // --- Utility for Historical Balance Check ---
+  /**
+   * Calculates the customer's outstanding balance immediately before the specified transaction.
+   * This is crucial for preventing over-payment edits in history.
+   */
+  const getBalanceBefore = (transactionId: string, customerId: string, allCredits: ExtendedCreditTransaction[]): number => {
+    const customerCredits = allCredits
+      .filter(c => c.customerId === customerId)
+      // Sort oldest first to correctly calculate running balance
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    let runningBalance = 0;
+    
+    for (const record of customerCredits) {
+        if (record.id === transactionId) {
+            return Math.max(0, runningBalance); // Return balance *before* this record
+        }
+        const isPayment = record.type === 'payment';
+        const amount = record.amount;
+        
+        if (isPayment) {
+            runningBalance -= amount;
+        } else {
+            runningBalance += amount;
+        }
+    }
+    return 0; 
+  };
+  // -------------------------------------------
+
+  // --- Payment Logic ---
 
   const handleReceivePayment = () => {
     if (!selectedCustomer || !paymentAmount || !paymentDate) {
@@ -64,34 +118,49 @@ export default function CreditPage() {
       return;
     }
 
-    const unpaidCredits = credits.filter(
-      c => c.customerId === selectedCustomer.id && c.status !== 'paid'
-    ).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    // 1. Create a NEW transaction record for the payment (Ledger style)
+    const paymentTransaction: ExtendedCreditTransaction = {
+      id: `pay-${Date.now()}`,
+      customerId: selectedCustomer.id,
+      customerName: selectedCustomer.name,
+      amount: amount,
+      date: new Date(paymentDate),
+      status: 'paid', 
+      saleId: '', 
+      type: 'payment' 
+    };
 
-    let remainingAmount = amount;
+    // 2. Update Sales Data (Sync with Sales Page)
+    const sales = storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || [];
     
-    for (const credit of unpaidCredits) {
-      if (remainingAmount <= 0) break;
+    // Get unpaid sales for this customer to distribute the payment
+    const unpaidSales = sales
+      .filter(s => s.customerId === selectedCustomer.id && s.paymentStatus !== 'paid')
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    let remainingPaymentToDistribute = amount;
+
+    for (const sale of unpaidSales) {
+      if (remainingPaymentToDistribute <= 0) break;
+
+      const currentRemaining = sale.amountRemaining !== undefined ? sale.amountRemaining : sale.totalAmount;
+      const amountToCover = Math.min(currentRemaining, remainingPaymentToDistribute);
+
+      // Update Sale
+      sale.amountPaid = (sale.amountPaid || 0) + amountToCover;
+      sale.amountRemaining = currentRemaining - amountToCover;
       
-      if (remainingAmount >= credit.amount) {
-        credit.status = 'paid';
-        credit.paymentDate = new Date(paymentDate);
-        remainingAmount -= credit.amount;
+      if (sale.amountRemaining <= 0) {
+        sale.amountRemaining = 0;
+        sale.paymentStatus = 'paid';
       } else {
-        credit.amount -= remainingAmount;
-        
-        const paidCredit: CreditTransaction = {
-          ...credit,
-          id: `${credit.id}-paid-${Date.now()}`,
-          amount: remainingAmount,
-          status: 'paid',
-          paymentDate: new Date(paymentDate)
-        };
-        credits.push(paidCredit);
-        remainingAmount = 0;
+        sale.paymentStatus = 'partial';
       }
+
+      remainingPaymentToDistribute -= amountToCover;
     }
 
+    // 3. Update Shop Account
     const accounts: Account[] = storage.get(STORAGE_KEYS.ACCOUNTS) || [];
     const shopAccount = accounts.find(a => a.type === 'shop');
     if (shopAccount) {
@@ -99,13 +168,199 @@ export default function CreditPage() {
       storage.set(STORAGE_KEYS.ACCOUNTS, accounts);
     }
 
-    storage.set(STORAGE_KEYS.CREDITS, credits);
-    setCredits([...credits]);
+    // 4. Save Everything
+    const newCredits = [...credits, paymentTransaction];
+    storage.set(STORAGE_KEYS.CREDITS, newCredits);
+    storage.set(STORAGE_KEYS.SALES, sales);
+    setCredits(newCredits.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+    
     setShowPaymentModal(false);
     setPaymentAmount('');
-    setPaymentDate(format(new Date(), 'yyyy-MM-dd'));
     setSelectedCustomer(null);
   };
+
+  // --- Transaction Management (Edit/Delete in History) ---
+
+  const handleDeleteTransaction = (transaction: ExtendedCreditTransaction) => {
+    if (!confirm('Are you sure you want to delete this transaction? This will update Sales and Inventory.')) return;
+
+    const sales = storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || [];
+    const purchases = storage.get<PurchaseItem[]>(STORAGE_KEYS.PURCHASES) || [];
+
+    if (transaction.type === 'payment') {
+      // --- LOGIC FOR DELETING A PAYMENT ---
+      let amountToRevert = transaction.amount;
+      
+      // Find sales that were paid recently (reverse order) for this customer
+      const customerSales = sales
+        .filter(s => s.customerId === transaction.customerId)
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      for (const sale of customerSales) {
+        if (amountToRevert <= 0) break;
+        if ((sale.amountPaid || 0) > 0) {
+          const revertableAmount = Math.min(sale.amountPaid || 0, amountToRevert);
+          
+          sale.amountPaid = (sale.amountPaid || 0) - revertableAmount;
+          sale.amountRemaining = (sale.amountRemaining || 0) + revertableAmount;
+          
+          if (sale.amountRemaining > 0) {
+            sale.paymentStatus = sale.amountRemaining === sale.totalAmount ? 'pending' : 'partial';
+          }
+          
+          amountToRevert -= revertableAmount;
+        }
+      }
+      
+      // Remove money from shop account
+      const accounts: Account[] = storage.get(STORAGE_KEYS.ACCOUNTS) || [];
+      const shopAccount = accounts.find(a => a.type === 'shop');
+      if (shopAccount) {
+        shopAccount.balance -= transaction.amount;
+        storage.set(STORAGE_KEYS.ACCOUNTS, accounts);
+      }
+
+    } else {
+      // --- LOGIC FOR DELETING A CREDIT (THE SALE ITSELF) ---
+      // This means we are deleting the debt, so we must delete the sale and restore inventory.
+      if (transaction.saleId) {
+        const saleToDelete = sales.find(s => s.id === transaction.saleId);
+        
+        if (saleToDelete) {
+          // 1. Restore Inventory
+          if (saleToDelete.batchesUsed && saleToDelete.batchesUsed.length > 0) {
+            for (const batch of saleToDelete.batchesUsed) {
+              const purchase = purchases.find(p =>
+                p.batchNumber === batch.batchId &&
+                (saleToDelete.itemType === 'OTHER'
+                  ? p.customItemName === saleToDelete.customItemName
+                  : p.itemType === saleToDelete.itemType)
+              );
+              if (purchase) {
+                purchase.remainingQuantity += batch.quantity;
+              }
+            }
+          } else {
+            // Fallback inventory restore
+            const itemMatches = (p: PurchaseItem) => {
+              if (saleToDelete.itemType === 'OTHER') {
+                return p.itemType === 'OTHER' && p.customItemName === saleToDelete.customItemName;
+              }
+              return p.itemType === saleToDelete.itemType;
+            };
+            const sortedPurchases = purchases.filter(itemMatches).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            if (sortedPurchases.length > 0) {
+              sortedPurchases[0].remainingQuantity += saleToDelete.quantity;
+            }
+          }
+
+          // 2. Remove the Sale from Sales list
+          const updatedSales = sales.filter(s => s.id !== transaction.saleId);
+          storage.set(STORAGE_KEYS.SALES, updatedSales);
+          storage.set(STORAGE_KEYS.PURCHASES, purchases); // Save restored inventory
+        }
+      }
+    }
+
+    // Finally, remove from Credits list and save Sales update (if payment)
+    const updatedCredits = credits.filter(c => c.id !== transaction.id);
+    
+    storage.set(STORAGE_KEYS.CREDITS, updatedCredits);
+    // We already saved SALES inside the if/else blocks if needed, but safe to save if modified
+    if (transaction.type === 'payment') {
+        storage.set(STORAGE_KEYS.SALES, sales);
+    }
+    
+    setCredits(updatedCredits);
+  };
+
+  const startEditingTransaction = (transaction: ExtendedCreditTransaction) => {
+    setEditingTransactionId(transaction.id);
+    setEditTransAmount(transaction.amount.toString());
+    setEditTransDate(format(new Date(transaction.date), 'yyyy-MM-dd'));
+  };
+
+  const saveEditedTransaction = (originalTransaction: ExtendedCreditTransaction) => {
+    const newAmount = parseFloat(editTransAmount);
+    if (isNaN(newAmount) || newAmount <= 0) {
+      alert('Invalid amount');
+      return;
+    }
+
+    // 1. Update the Local Credit Record
+    const updatedCredits = credits.map(c => {
+      if (c.id === originalTransaction.id) {
+        return {
+          ...c,
+          amount: newAmount,
+          date: new Date(editTransDate)
+        };
+      }
+      return c;
+    });
+
+    // 2. Sync with Sales Page
+    const sales = storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || [];
+    
+    if (originalTransaction.type === 'credit' && originalTransaction.saleId) {
+      // Find the specific sale and update it
+      const sale = sales.find(s => s.id === originalTransaction.saleId);
+      if (sale) {
+        const amountPaid = sale.amountPaid || 0;
+        
+        // CHECK 1: Cannot set credit amount less than what's already paid
+        if (newAmount < amountPaid) {
+          alert(`The new credit amount (Rs ${newAmount.toLocaleString('en-PK')}) cannot be less than the amount already paid (Rs ${amountPaid.toLocaleString('en-PK')}).`);
+          setEditingTransactionId(null);
+          return;
+        }
+        
+        sale.totalAmount = newAmount;
+        sale.date = new Date(editTransDate);
+        // Recalculate remaining based on what has been paid
+        sale.amountRemaining = newAmount - amountPaid;
+        
+        // Update payment status
+        if (sale.amountRemaining <= 0) {
+            sale.amountRemaining = 0;
+            sale.paymentStatus = 'paid';
+        } else if (amountPaid > 0) {
+            sale.paymentStatus = 'partial';
+        } else {
+            sale.paymentStatus = 'pending';
+        }
+      }
+    } else if (originalTransaction.type === 'payment') {
+       
+       // CHECK 2: Payment amount cannot exceed the balance prior to this transaction.
+       const balanceBefore = getBalanceBefore(originalTransaction.id, originalTransaction.customerId, credits);
+        
+       if (newAmount > balanceBefore) {
+            alert(`The new payment amount (Rs ${newAmount.toLocaleString('en-PK')}) cannot exceed the customer's outstanding debt immediately prior to this transaction (Rs ${balanceBefore.toLocaleString('en-PK')}).`);
+            setEditingTransactionId(null);
+            return;
+       }
+
+       // If editing a payment amount, this is complex (re-distributing funds).
+       // However, we will update the Shop Account balance at least.
+       const diff = newAmount - originalTransaction.amount;
+       const accounts: Account[] = storage.get(STORAGE_KEYS.ACCOUNTS) || [];
+       const shopAccount = accounts.find(a => a.type === 'shop');
+       if (shopAccount) {
+         shopAccount.balance += diff;
+         storage.set(STORAGE_KEYS.ACCOUNTS, accounts);
+       }
+       // Note: To fully sync changed payment amounts to specific sales history is very hard without a full re-calc.
+       alert("Payment amount updated in ledger. For perfect accuracy across all sale records, please delete and re-enter the payment.");
+    }
+
+    storage.set(STORAGE_KEYS.SALES, sales);
+    storage.set(STORAGE_KEYS.CREDITS, updatedCredits);
+    setCredits(updatedCredits.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+    setEditingTransactionId(null);
+  };
+
+  // --- Customer Management ---
 
   const handleEditCustomer = () => {
     if (!selectedCustomer || !editName.trim() || !editPhone.trim()) {
@@ -113,135 +368,120 @@ export default function CreditPage() {
       return;
     }
 
-    const customerIndex = customers.findIndex(c => c.id === selectedCustomer.id);
-    if (customerIndex !== -1) {
-      customers[customerIndex].name = editName.trim();
-      customers[customerIndex].phone = editPhone.trim();
-      
-      credits.forEach(credit => {
-        if (credit.customerId === selectedCustomer.id) {
-          credit.customerName = editName.trim();
-        }
-      });
+    const updatedCustomers = customers.map(c => 
+      c.id === selectedCustomer.id 
+        ? { ...c, name: editName.trim(), phone: editPhone.trim() }
+        : c
+    );
 
-      storage.set(STORAGE_KEYS.CUSTOMERS, customers);
-      storage.set(STORAGE_KEYS.CREDITS, credits);
-      setCustomers([...customers]);
-      setCredits([...credits]);
-      setShowEditModal(false);
-      setEditName('');
-      setEditPhone('');
-      
-      setSelectedCustomer({
-        ...selectedCustomer,
-        name: editName.trim(),
-        phone: editPhone.trim()
-      });
-    }
+    // Update names in credits too
+    const updatedCredits = credits.map(c => 
+      c.customerId === selectedCustomer.id 
+        ? { ...c, customerName: editName.trim() }
+        : c
+    );
+
+    // Update names in sales too (Sync Requirement)
+    const sales = storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || [];
+    const updatedSales = sales.map(s => 
+      s.customerId === selectedCustomer.id
+        ? { ...s, customerName: editName.trim() }
+        : s
+    );
+
+    storage.set(STORAGE_KEYS.CUSTOMERS, updatedCustomers);
+    storage.set(STORAGE_KEYS.CREDITS, updatedCredits);
+    storage.set(STORAGE_KEYS.SALES, updatedSales);
+    
+    setCustomers(updatedCustomers);
+    setCredits(updatedCredits);
+    setShowEditModal(false);
+    
+    setSelectedCustomer({
+      ...selectedCustomer,
+      name: editName.trim(),
+      phone: editPhone.trim()
+    });
   };
 
   const handleDeleteCustomer = () => {
     if (!selectedCustomer) return;
-
-    const hasUnpaidCredits = credits.some(
-      c => c.customerId === selectedCustomer.id && c.status !== 'paid'
-    );
-
-    if (hasUnpaidCredits) {
+    if (selectedCustomer.pendingAmount > 0) {
       alert('Cannot delete customer with pending payments. Please clear all payments first.');
       return;
     }
 
-    if (confirm(`Are you sure you want to delete ${selectedCustomer.name}? This will also delete all their transaction history.`)) {
+    if (confirm(`Delete ${selectedCustomer.name}? This removes all history.`)) {
       const updatedCustomers = customers.filter(c => c.id !== selectedCustomer.id);
       const updatedCredits = credits.filter(c => c.customerId !== selectedCustomer.id);
-
+      
       storage.set(STORAGE_KEYS.CUSTOMERS, updatedCustomers);
       storage.set(STORAGE_KEYS.CREDITS, updatedCredits);
       setCustomers(updatedCustomers);
       setCredits(updatedCredits);
       setShowEditModal(false);
-      setEditName('');
-      setEditPhone('');
       setSelectedCustomer(null);
     }
   };
 
-  const openHistoryModal = (customer: typeof customerSummary[0]) => {
-    setSelectedCustomer(customer);
-    setShowHistoryModal(true);
-  };
-
-  const openPaymentModal = (customer: typeof customerSummary[0]) => {
-    setSelectedCustomer(customer);
-    setPaymentDate(format(new Date(), 'yyyy-MM-dd'));
-    setShowPaymentModal(true);
-  };
-
-  const openEditModal = (customer: typeof customerSummary[0]) => {
-    setSelectedCustomer(customer);
-    setEditName(customer.name);
-    setEditPhone(customer.phone);
-    setShowEditModal(true);
-  };
-
-  const totalPending = credits.filter(c => c.status === 'pending').reduce((sum, c) => sum + c.amount, 0);
-  const totalOverdue = credits.filter(c => c.status === 'overdue').reduce((sum, c) => sum + c.amount, 0);
-  const overdueCount = credits.filter(c => c.status === 'overdue').length;
+  // --- Derived State & Calculations ---
 
   const customerSummary = customers.map(customer => {
     const customerCredits = credits.filter(c => c.customerId === customer.id);
-    const pendingAmount = customerCredits.filter(c => c.status !== 'paid').reduce((sum, c) => sum + c.amount, 0);
-    const overdueAmount = customerCredits.filter(c => c.status === 'overdue').reduce((sum, c) => sum + c.amount, 0);
+    
+    // Ledger Calculation: (Total Debts) - (Total Payments)
+    const totalDebt = customerCredits
+      .filter(c => c.type === 'credit')
+      .reduce((sum, c) => sum + c.amount, 0);
+      
+    const totalPaid = customerCredits
+      .filter(c => c.type === 'payment')
+      .reduce((sum, c) => sum + c.amount, 0);
+
+    const pendingAmount = totalDebt - totalPaid;
+    
+    // Calculate overdue specifically on unpaid credit lines (heuristic)
+    const overdueAmount = customerCredits
+      .filter(c => c.type === 'credit' && c.status === 'overdue')
+      .reduce((sum, c) => sum + c.amount, 0);
+
     return {
       ...customer,
-      pendingAmount,
+      pendingAmount: Math.max(0, pendingAmount), // Safety floor
       overdueAmount,
       transactionCount: customerCredits.length
     };
   }).filter(c => c.transactionCount > 0);
 
-const getCustomerHistory = (customerId: string) => {
-  const customerCredits = credits.filter(c => c.customerId === customerId);
+  const getCustomerHistory = (customerId: string) => {
+    // Sort oldest first for running balance calculation
+    const customerCredits = credits
+      .filter(c => c.customerId === customerId)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  let runningBalance = 0;
-  const history: Array<{
-    date: Date;
-    type: string;
-    credit: number;
-    received: number;
-    balance: number;
-    sortDate: number;
-  }> = [];
-  
-  for (const credit of customerCredits) {
-    if (credit.status === 'paid' && credit.paymentDate) {
-      // For paid credits, only show the payment (received), not the original credit
-      runningBalance -= credit.amount;
-      history.push({
-        date: credit.paymentDate,
-        type: 'payment',
-        credit: 0,
-        received: credit.amount,
-        balance: runningBalance,
-        sortDate: new Date(credit.paymentDate).getTime()
-      });
-    } else {
-      // Unpaid credit - show in credit column
-      runningBalance += credit.amount;
-      history.push({
-        date: credit.date,
-        type: 'credit',
-        credit: credit.amount,
-        received: 0,
-        balance: runningBalance,
-        sortDate: new Date(credit.date).getTime()
-      });
-    }
-  }
-  
-  return history.sort((a, b) => a.sortDate - b.sortDate);
-};
+    let runningBalance = 0;
+    
+    return customerCredits.map(record => {
+      const isPayment = record.type === 'payment';
+      const amount = record.amount;
+      
+      if (isPayment) {
+        runningBalance -= amount;
+      } else {
+        runningBalance += amount;
+      }
+
+      return {
+        ...record,
+        displayType: isPayment ? 'Payment' : 'Credit',
+        credit: isPayment ? 0 : amount,
+        received: isPayment ? amount : 0,
+        runningBalance: runningBalance
+      };
+    });
+  };
+
+  const overdueCount = customerSummary.filter(c => c.overdueAmount > 0).length;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 animate-in fade-in duration-500">
@@ -255,7 +495,7 @@ const getCustomerHistory = (customerId: string) => {
           {overdueCount > 0 && (
             <div className="bg-red-50 text-red-700 px-4 py-2.5 rounded-lg flex items-center gap-2 border border-red-200 shadow-sm">
               <AlertTriangle className="w-5 h-5" />
-              <span className="font-semibold text-sm">Action Needed: {overdueCount} Overdue Customer{overdueCount > 1 ? 's' : ''} (&gt;45 Days)</span>
+              <span className="font-semibold text-sm">Action Needed: {overdueCount} Overdue Customer{overdueCount > 1 ? 's' : ''}</span>
             </div>
           )}
         </div>
@@ -263,12 +503,13 @@ const getCustomerHistory = (customerId: string) => {
         {/* Search and Filter */}
         <div className="flex flex-col sm:flex-row gap-4 mb-6">
           <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-5 h-5" />
             <input
               type="text"
               placeholder="Search customer by name or phone..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full px-4 py-3 bg-white border border-slate-300 text-slate-900 placeholder-slate-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm transition-all"
+              className="w-full pl-10 pr-4 py-3 bg-white border border-slate-300 text-slate-900 placeholder-slate-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm transition-all"
             />
           </div>
           <button
@@ -279,7 +520,7 @@ const getCustomerHistory = (customerId: string) => {
                 : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50'
             }`}
           >
-            Filter Overdue
+            {filter === 'overdue' ? 'Show All' : 'Filter Overdue'}
           </button>
         </div>
 
@@ -295,13 +536,15 @@ const getCustomerHistory = (customerId: string) => {
             })
             .map(customer => {
               const isOverdue = customer.overdueAmount > 0;
-              const lastTransaction = credits
-                .filter(c => c.customerId === customer.id && c.status !== 'paid')
-                .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
               
-              const lastPaymentDays = lastTransaction 
-                ? differenceInDays(new Date(), new Date(lastTransaction.date))
-                : 0;
+              // Get actual last payment
+              const lastPayment = credits
+                .filter(c => c.customerId === customer.id && c.type === 'payment')
+                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+              
+              const lastPaymentDays = lastPayment 
+                ? differenceInDays(new Date(), new Date(lastPayment.date))
+                : null;
 
               return (
                 <div
@@ -314,16 +557,21 @@ const getCustomerHistory = (customerId: string) => {
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-2">
                         <button
-                          onClick={() => openEditModal(customer)}
+                          onClick={() => {
+                            setSelectedCustomer(customer);
+                            setEditName(customer.name);
+                            setEditPhone(customer.phone);
+                            setShowEditModal(true);
+                          }}
                           className="text-slate-400 hover:text-blue-600 transition-colors"
-                          title="Edit Customer"
+                          title="Edit Customer Details"
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <h3 className="text-lg font-bold text-slate-800">{customer.name}</h3>
                         {isOverdue && (
                           <span className="bg-red-100 text-red-700 text-xs px-2 py-0.5 rounded-full font-bold uppercase tracking-wide">
-                            Overdue Alert
+                            Overdue
                           </span>
                         )}
                       </div>
@@ -332,16 +580,17 @@ const getCustomerHistory = (customerId: string) => {
                           <Phone className="w-4 h-4" />
                           {customer.phone}
                         </span>
-                        <span>•</span>
-                        <span>
-                          Last Payment: {lastTransaction 
-                            ? `${format(new Date(lastTransaction.date), 'dd/MM/yyyy')} (${lastPaymentDays} days ago)`
-                            : 'No pending payments'}
+                        <span className="hidden sm:inline">•</span>
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-4 h-4" />
+                          {lastPayment 
+                            ? `Last Payment: ${format(new Date(lastPayment.date), 'dd/MM/yyyy')} (${lastPaymentDays} days ago)`
+                            : 'No payments received yet'}
                         </span>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-6 w-full md:w-auto justify-between md:justify-end">
                       <div className="text-right">
                         <p className="text-xs text-slate-500 uppercase font-semibold mb-1">Pending Balance</p>
                         <p className={`text-2xl font-bold ${
@@ -353,17 +602,24 @@ const getCustomerHistory = (customerId: string) => {
 
                       <div className="flex gap-2">
                         <button
-                          onClick={() => openHistoryModal(customer)}
+                          onClick={() => {
+                            setSelectedCustomer(customer);
+                            setShowHistoryModal(true);
+                          }}
                           className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
                           title="View History"
                         >
-                          <History className="w-4 h-4" />
+                          <History className="w-5 h-5" />
                         </button>
                         <button
-                          onClick={() => openPaymentModal(customer)}
-                          disabled={customer.pendingAmount === 0}
+                          onClick={() => {
+                            setSelectedCustomer(customer);
+                            setPaymentDate(format(new Date(), 'yyyy-MM-dd'));
+                            setShowPaymentModal(true);
+                          }}
+                          disabled={customer.pendingAmount <= 0}
                           className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
-                            customer.pendingAmount === 0
+                            customer.pendingAmount <= 0
                               ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
                               : isOverdue 
                               ? 'bg-red-600 hover:bg-red-700 text-white'
@@ -371,7 +627,7 @@ const getCustomerHistory = (customerId: string) => {
                           }`}
                         >
                           <Wallet className="w-4 h-4" />
-                          <span>Receive Payment</span>
+                          <span>Receive</span>
                         </button>
                       </div>
                     </div>
@@ -380,20 +636,12 @@ const getCustomerHistory = (customerId: string) => {
               );
             })}
           
-          {customerSummary.filter(customer => {
-            const matchesSearch = customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                                 customer.phone.includes(searchTerm);
-            const matchesFilter = filter === 'all' || 
-                                 (filter === 'overdue' && customer.overdueAmount > 0);
-            return matchesSearch && matchesFilter;
-          }).length === 0 && (
+          {customerSummary.length === 0 && (
             <div className="bg-white rounded-lg shadow-sm p-12 text-center">
               <User className="w-16 h-16 text-slate-300 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-slate-800 mb-2">No customers found</h3>
               <p className="text-slate-500">
-                {filter === 'overdue' 
-                  ? 'No customers with overdue payments'
-                  : 'No customers with pending credits match your search'}
+                Try adjusting your search or filters.
               </p>
             </div>
           )}
@@ -403,24 +651,29 @@ const getCustomerHistory = (customerId: string) => {
       {/* History Modal */}
       {showHistoryModal && selectedCustomer && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[85vh] overflow-hidden">
-            <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-5 flex items-center justify-between">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[85vh] overflow-hidden flex flex-col">
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-5 flex items-center justify-between shrink-0">
               <div>
                 <h2 className="text-2xl font-bold">{selectedCustomer.name}</h2>
-                <p className="text-blue-100 text-sm mt-1">Complete transaction history</p>
+                <p className="text-blue-100 text-sm mt-1">Transaction History</p>
               </div>
               <button
-                onClick={() => setShowHistoryModal(false)}
+                onClick={() => {
+                  setShowHistoryModal(false);
+                  setEditingTransactionId(null);
+                }}
                 className="p-2 hover:bg-white/20 rounded-lg transition-colors"
               >
                 <X className="w-6 h-6" />
               </button>
             </div>
             
-            <div className="p-6 overflow-y-auto max-h-[calc(85vh-100px)]">
-              <div className="bg-blue-50 rounded-xl p-5 mb-6 border border-blue-100">
-                <p className="text-sm text-slate-600 mb-1">Current Balance</p>
-                <p className="text-3xl font-bold text-blue-600">Rs {selectedCustomer.pendingAmount.toLocaleString('en-PK')}</p>
+            <div className="p-6 overflow-y-auto">
+              <div className="bg-blue-50 rounded-xl p-5 mb-6 border border-blue-100 flex justify-between items-center">
+                <div>
+                  <p className="text-sm text-slate-600 mb-1">Current Pending Balance</p>
+                  <p className="text-3xl font-bold text-blue-600">Rs {selectedCustomer.pendingAmount.toLocaleString('en-PK')}</p>
+                </div>
               </div>
 
               <div className="overflow-x-auto">
@@ -428,33 +681,87 @@ const getCustomerHistory = (customerId: string) => {
                   <thead>
                     <tr className="border-b-2 border-slate-200">
                       <th className="text-left py-3 px-4 text-xs font-semibold text-slate-600 uppercase">Date</th>
-                      <th className="text-right py-3 px-4 text-xs font-semibold text-slate-600 uppercase">Credit</th>
-                      <th className="text-right py-3 px-4 text-xs font-semibold text-slate-600 uppercase">Received</th>
+                      <th className="text-right py-3 px-4 text-xs font-semibold text-slate-600 uppercase">Debt (Credit)</th>
+                      <th className="text-right py-3 px-4 text-xs font-semibold text-slate-600 uppercase">Payment (Received)</th>
                       <th className="text-right py-3 px-4 text-xs font-semibold text-slate-600 uppercase">Balance</th>
+                      <th className="text-center py-3 px-4 text-xs font-semibold text-slate-600 uppercase">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {getCustomerHistory(selectedCustomer.id).map((record, index) => (
-                      <tr key={index} className="hover:bg-slate-50 transition-colors">
+                      <tr key={record.id || index} className="hover:bg-slate-50 transition-colors group">
                         <td className="py-4 px-4 text-sm text-slate-800 font-medium">
-                          {format(new Date(record.date), 'MMM dd, yyyy')}
+                          {editingTransactionId === record.id ? (
+                            <input 
+                              type="date" 
+                              value={editTransDate}
+                              onChange={(e) => setEditTransDate(e.target.value)}
+                              className="border rounded p-1 text-sm w-32"
+                            />
+                          ) : (
+                            format(new Date(record.date), 'dd MMM yyyy')
+                          )}
                         </td>
                         <td className="py-4 px-4 text-sm text-right">
                           {record.credit > 0 ? (
-                            <span className="text-red-600 font-semibold">Rs {record.credit.toLocaleString('en-PK')}</span>
+                            editingTransactionId === record.id ? (
+                              <input 
+                                type="number" 
+                                value={editTransAmount}
+                                onChange={(e) => setEditTransAmount(e.target.value)}
+                                className="border rounded p-1 text-sm w-24 text-right"
+                              />
+                            ) : (
+                              <span className="text-red-600 font-semibold">Rs {record.credit.toLocaleString('en-PK')}</span>
+                            )
                           ) : (
                             <span className="text-slate-300">-</span>
                           )}
                         </td>
                         <td className="py-4 px-4 text-sm text-right">
                           {record.received > 0 ? (
-                            <span className="text-green-600 font-semibold">Rs {record.received.toLocaleString('en-PK')}</span>
+                             editingTransactionId === record.id ? (
+                              <input 
+                                type="number" 
+                                value={editTransAmount}
+                                onChange={(e) => setEditTransAmount(e.target.value)}
+                                className="border rounded p-1 text-sm w-24 text-right"
+                              />
+                            ) : (
+                              <span className="text-green-600 font-semibold">Rs {record.received.toLocaleString('en-PK')}</span>
+                            )
                           ) : (
                             <span className="text-slate-300">-</span>
                           )}
                         </td>
                         <td className="py-4 px-4 text-sm text-right font-bold text-slate-800">
-                          Rs {Math.max(0, record.balance).toLocaleString('en-PK')}
+                          Rs {record.runningBalance.toLocaleString('en-PK')}
+                        </td>
+                        <td className="py-4 px-4 text-center">
+                          <div className="flex items-center justify-center gap-2"> 
+                            {editingTransactionId === record.id ? (
+                              <button 
+                                onClick={() => saveEditedTransaction(record)}
+                                className="p-1.5 bg-green-100 text-green-700 rounded hover:bg-green-200"
+                              >
+                                <Save className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <button 
+                                onClick={() => startEditingTransaction(record)}
+                                className="p-1.5 bg-slate-100 text-slate-600 rounded hover:bg-blue-100 hover:text-blue-600"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                            )}
+                            
+                            <button 
+                              onClick={() => handleDeleteTransaction(record)}
+                              className="p-1.5 bg-slate-100 text-slate-600 rounded hover:bg-red-100 hover:text-red-600"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -498,6 +805,7 @@ const getCustomerHistory = (customerId: string) => {
                     onChange={(e) => setPaymentAmount(e.target.value)}
                     placeholder="0"
                     className="w-full pl-12 pr-4 py-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg transition-all"
+                    autoFocus
                   />
                 </div>
               </div>
@@ -529,7 +837,7 @@ const getCustomerHistory = (customerId: string) => {
                   onClick={handleReceivePayment}
                   className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all font-medium shadow-lg shadow-blue-500/30"
                 >
-                  Confirm Payment
+                  Confirm
                 </button>
               </div>
             </div>
@@ -543,7 +851,6 @@ const getCustomerHistory = (customerId: string) => {
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
             <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-5 rounded-t-2xl">
               <h2 className="text-2xl font-bold">Edit Customer</h2>
-              <p className="text-blue-100 text-sm mt-1">Update customer information</p>
             </div>
             
             <div className="p-6">
@@ -555,7 +862,6 @@ const getCustomerHistory = (customerId: string) => {
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
-                  placeholder="Enter customer name"
                   className="w-full px-4 py-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
                 />
               </div>
@@ -568,7 +874,6 @@ const getCustomerHistory = (customerId: string) => {
                   type="tel"
                   value={editPhone}
                   onChange={(e) => setEditPhone(e.target.value)}
-                  placeholder="Enter phone number"
                   className="w-full px-4 py-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
                 />
               </div>
@@ -583,8 +888,6 @@ const getCustomerHistory = (customerId: string) => {
                 <button
                   onClick={() => {
                     setShowEditModal(false);
-                    setEditName('');
-                    setEditPhone('');
                   }}
                   className="flex-1 px-4 py-3 bg-white border-2 border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition-all font-medium"
                 >

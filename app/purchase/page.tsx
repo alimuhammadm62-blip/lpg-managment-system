@@ -6,7 +6,11 @@ import { storage, STORAGE_KEYS } from '@/lib/storage';
 import type { PurchaseItem, ItemType } from '@/lib/types';
 import { format } from 'date-fns';
 
-const ITEM_TYPES: (ItemType | 'OTHER')[] = ['SN', 'BN', 'C', 'BNS', 'SNS', 'CS', 'ABN', 'ASN', 'OTHER'];
+const ITEM_MULTIPLIERS: Record<string, number> = {
+  'C': 43,
+};
+
+const ITEM_TYPES = ['SN', 'BN', 'C', 'BNS', 'SNS', 'CS', 'ABN', 'ASN', 'OTHER'];
 
 interface PurchaseLineItem {
   id: string;
@@ -118,18 +122,22 @@ export default function PurchasePage() {
     lineItems.forEach(line => {
       if (!line.quantity || !line.pricePerUnit) return;
 
-      const newPurchase: PurchaseItem = {
-        id: `${Date.now()}-${Math.random()}`,
-        date: new Date(formData.date),
-        itemType: line.itemType,
-        customItemName: line.itemType === 'OTHER' ? line.customItemName : undefined,
-        quantity: parseFloat(line.quantity),
-        pricePerUnit: parseFloat(line.pricePerUnit),
-        totalCost: parseFloat(line.quantity) * parseFloat(line.pricePerUnit),
-        supplier: formData.supplier,
-        batchNumber: batchNumber,
-        remainingQuantity: parseFloat(line.quantity),
-      };
+      const quantity = parseFloat(line.quantity);
+const multiplier = ITEM_MULTIPLIERS[line.itemType] || 1;
+const actualInventoryQuantity = quantity * multiplier;
+
+const newPurchase: PurchaseItem = {
+  id: `${Date.now()}-${Math.random()}`,
+  date: new Date(formData.date),
+  itemType: line.itemType,
+  customItemName: line.itemType === 'OTHER' ? line.customItemName : undefined,
+  quantity: actualInventoryQuantity,  // Store as kg
+  pricePerUnit: parseFloat(line.pricePerUnit),
+  totalCost: quantity * parseFloat(line.pricePerUnit),  // Cost is still based on units purchased
+  supplier: formData.supplier,
+  batchNumber: batchNumber,
+  remainingQuantity: actualInventoryQuantity,  // Remaining is in kg
+};
 
       newPurchases.push(newPurchase);
 
