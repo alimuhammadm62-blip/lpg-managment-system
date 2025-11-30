@@ -177,6 +177,14 @@ export default function CreditPage() {
   // --- Transaction Management (Edit/Delete in History) ---
 
   const handleDeleteTransaction = (transaction: ExtendedCreditTransaction) => {
+  if (transaction.type === 'credit') {
+    const balanceAfterDeletion = getBalanceBefore(transaction.id, transaction.customerId, credits) - transaction.amount;
+    
+    if (balanceAfterDeletion < 0) {
+      alert(`Cannot delete this credit transaction. Deleting it would result in an overpayment. Please adjust or remove payments first.`);
+      return;
+    }
+  }
     if (!confirm('Are you sure you want to delete this transaction? This will update Sales and Inventory.')) return;
 
     const sales = (storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || []) as (Omit<SaleItem, 'paymentStatus'> & { 
@@ -298,33 +306,49 @@ export default function CreditPage() {
     })[];
     
     // --- SCENARIO A: EDITING A CREDIT (SALE) ---
-    if (originalTransaction.type === 'credit' && originalTransaction.saleId) {
-      const sale = sales.find(s => s.id === originalTransaction.saleId);
-      if (sale) {
-        const amountPaid = sale.amountPaid || 0;
-        
-        // CHECK 1: Cannot set credit amount less than what's already paid
-        if (newAmount < amountPaid) {
-          alert(`The new credit amount (Rs ${newAmount.toLocaleString('en-PK')}) cannot be less than the amount already paid (Rs ${amountPaid.toLocaleString('en-PK')}).`);
-          setEditingTransactionId(null);
-          return;
-        }
-        
-        sale.totalAmount = newAmount;
-        sale.date = new Date(editTransDate);
-        sale.amountRemaining = newAmount - amountPaid;
-        
-        // Update payment status (Fixed Logic)
-        if (sale.amountRemaining <= 0) {
-            sale.amountRemaining = 0;
-            sale.paymentStatus = 'paid';
-        } else if (amountPaid > 0) {
-            sale.paymentStatus = 'partial';
-        } else {
-            sale.paymentStatus = 'pending';
-        }
-      }
-    } 
+if (originalTransaction.type === 'credit' && originalTransaction.saleId) {
+  const sale = sales.find(s => s.id === originalTransaction.saleId);
+  if (sale) {
+    const amountPaid = sale.amountPaid || 0;
+    
+    // CHECK 1: Cannot set credit amount less than what's already paid
+    if (newAmount < amountPaid) {
+      alert(`The new credit amount (Rs ${newAmount.toLocaleString('en-PK')}) cannot be less than the amount already paid (Rs ${amountPaid.toLocaleString('en-PK')}).`);
+      setEditingTransactionId(null);
+      return;
+    }
+    
+    // NEW CHECK 2: Validate against overall customer balance
+    const currentCustomerCredits = credits.filter(c => c.customerId === originalTransaction.customerId);
+    const totalDebt = currentCustomerCredits.filter(c => c.type === 'credit').reduce((sum, c) => sum + c.amount, 0);
+    const totalPaid = currentCustomerCredits.filter(c => c.type === 'payment').reduce((sum, c) => sum + c.amount, 0);
+    
+    // Calculate what the new debt would be after this edit
+    const debtDifference = newAmount - originalTransaction.amount;
+    const newTotalDebt = totalDebt + debtDifference;
+    
+    if (newTotalDebt < totalPaid) {
+      const overpayment = totalPaid - newTotalDebt;
+      alert(`Cannot reduce credit to Rs ${newAmount.toLocaleString('en-PK')}. This would result in an overpayment of Rs ${overpayment.toLocaleString('en-PK')}. Total payments received (Rs ${totalPaid.toLocaleString('en-PK')}) would exceed total debt.`);
+      setEditingTransactionId(null);
+      return;
+    }
+    
+    sale.totalAmount = newAmount;
+    sale.date = new Date(editTransDate);
+    sale.amountRemaining = newAmount - amountPaid;
+    
+    // Update payment status (Fixed Logic)
+    if (sale.amountRemaining <= 0) {
+        sale.amountRemaining = 0;
+        sale.paymentStatus = 'paid';
+    } else if (amountPaid > 0) {
+        sale.paymentStatus = 'partial';
+    } else {
+        sale.paymentStatus = 'pending';
+    }
+  }
+}
     // --- SCENARIO B: EDITING A PAYMENT ---
     else if (originalTransaction.type === 'payment') {
        

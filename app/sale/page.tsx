@@ -453,6 +453,11 @@ export default function SalePage() {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4 sm:p-6 md:p-8">
       <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
         {/* Header */}
+
+<div>
+            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900 mb-2">Sale Management</h1>
+          </div>
+
         <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3 sm:gap-4">
           <div className="flex flex-col items-center w-full sm:min-w-[200px] sm:w-auto">
             <p className="text-sm sm:text-base text-gray-900 font-semibold mb-1">Total Sales</p>
@@ -941,8 +946,11 @@ export default function SalePage() {
                       });
                     }
                   }}
-                  className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                >
+         
+                   
+                  
+
+                  className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
                   <option value="">Select Period</option>
                   <option value="0">Jan</option>
                   <option value="1">Feb</option>
