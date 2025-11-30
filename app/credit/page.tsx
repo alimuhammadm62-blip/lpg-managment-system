@@ -124,14 +124,19 @@ export default function CreditPage() {
       customerName: selectedCustomer.name,
       amount: amount,
       date: new Date(paymentDate),
-      dueDate: new Date(paymentDate), // FIXED: Added dueDate to satisfy type requirement
-      status: 'paid', 
-      saleId: '', 
-      type: 'payment' 
+      dueDate: new Date(paymentDate),
+      status: 'paid', // Payments are always "paid"
+      saleId: '', // Not linked to single sale directly anymore
+      type: 'payment' // Crucial: Marks this as a payment line
     };
 
     // 2. Update Sales Data (Sync with Sales Page)
-    const sales = storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || [];
+    // FIX: Cast sales to include the optional payment fields to satisfy TypeScript
+    const sales = (storage.get<SaleItem[]>(STORAGE_KEYS.SALES) || []) as (SaleItem & { 
+      amountRemaining?: number; 
+      amountPaid?: number; 
+      paymentStatus?: string; 
+    })[];
     
     // Get unpaid sales for this customer to distribute the payment
     const unpaidSales = sales
