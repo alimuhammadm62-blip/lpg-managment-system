@@ -25,7 +25,6 @@ export default function CreditPage() {
   // Selection & Form Data
   const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
   const [paymentAmount, setPaymentAmount] = useState('');
-  // FIXED: Added useState wrapper here
   const [paymentDate, setPaymentDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   
   // Customer Edit Data
@@ -125,6 +124,7 @@ export default function CreditPage() {
       customerName: selectedCustomer.name,
       amount: amount,
       date: new Date(paymentDate),
+      dueDate: new Date(paymentDate), // FIXED: Added dueDate to satisfy type requirement
       status: 'paid', 
       saleId: '', 
       type: 'payment' 
