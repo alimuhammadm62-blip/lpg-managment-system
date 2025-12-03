@@ -12,19 +12,6 @@ export const storage = {
     }
   },
 
-export function safeGetArray<T>(key: string): T[] {
-  const data = storage.get(key);
-
-  // If not array → reset and return []
-  if (!Array.isArray(data)) {
-    storage.set(key, []);
-    return [];
-  }
-
-  return data as T[];
-}
-
-
   set: <T>(key: string, value: T): void => {
     if (typeof window === 'undefined') return;
     try {
@@ -43,6 +30,18 @@ export function safeGetArray<T>(key: string): T[] {
     }
   }
 };
+
+// ✅ SAFE ARRAY GETTER (outside the storage object)
+export function safeGetArray<T>(key: string): T[] {
+  const data = storage.get(key);
+
+  if (!Array.isArray(data)) {
+    storage.set(key, []);
+    return [];
+  }
+
+  return data as T[];
+}
 
 // Storage keys
 export const STORAGE_KEYS = {
