@@ -12,7 +12,7 @@ import {
   X
 } from 'lucide-react';
 import { storage, STORAGE_KEYS } from '@/lib/storage';
-import type { PurchaseItem, SaleRecord, InventoryItem } from '@/lib/types';
+import type { PurchaseItem, SaleItem, InventoryItem } from '@/lib/types';
 import { 
   format, 
   startOfDay, 
@@ -24,7 +24,7 @@ import {
 } from 'date-fns';
 
 // Extended SaleItem type to match sales page
-type ExtendedSaleItem = SaleRecord & {
+type ExtendedSaleItem = SaleItem & {
   itemType: string;
   customItemName?: string;
   quantity: number;
