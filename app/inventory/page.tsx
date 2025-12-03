@@ -12,7 +12,7 @@ import {
   X
 } from 'lucide-react';
 import { storage, STORAGE_KEYS } from '@/lib/storage';
-import type { PurchaseItem, SaleRecord, InventoryItem } from '@/lib/types';
+import type { PurchaseItem, InventoryItem } from '@/lib/types';
 import { 
   format, 
   startOfDay, 
