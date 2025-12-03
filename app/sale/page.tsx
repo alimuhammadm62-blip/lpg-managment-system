@@ -545,110 +545,132 @@ export default function SalePage() {
                   </div>
 
                   {/* Credit Customer Section */}
-                  {formData.isCredit && (
-                    <div className="border-t-2 border-gray-200 pt-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-                        {/* Left Column - Customer Selection */}
-                        <div className="p-4 bg-orange-50 rounded-xl border-2 border-orange-200">
-                          <div className="flex items-center justify-between mb-3">
-                            <h3 className="text-sm sm:text-base font-bold text-gray-900">Customer Selection</h3>
-                          </div>
-                          
-                          <div>
-                            <label className="block text-xs font-semibold text-gray-700 mb-2">Select Existing Customer</label>
-                            <div className="flex gap-2">
-                              <div className="relative flex-1">
-                                <select
-                                  value={formData.customerId}
-                                  onChange={(e) => {
-                                    const selectedCustomer = customers.find(c => c.id === e.target.value);
-                                    if (selectedCustomer) {
-                                      setFormData({
-                                        ...formData,
-                                        customerId: selectedCustomer.id,
-                                        customerName: selectedCustomer.name,
-                                        customerPhone: selectedCustomer.phone,
-                                      });
-                                    } else {
-                                      setFormData({
-                                        ...formData,
-                                        customerId: '',
-                                        customerName: '',
-                                        customerPhone: '',
-                                      });
-                                    }
-                                  }}
-                                  className="w-full px-3 py-2 sm:py-2.5 text-xs sm:text-sm border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white"
-                                >
-                                  <option value="">Select a customer...</option>
-                                  {customers.map(c => (
-                                    <option key={c.id} value={c.id}>
-                                      {c.name} - {c.phone}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                              
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const isShowing = document.getElementById('new-customer-form')?.style.display !== 'none';
-                                  const form = document.getElementById('new-customer-form');
-                                  if (form) {
-                                    form.style.display = isShowing ? 'none' : 'block';
-                                  }
-                                  if (!isShowing) {
-                                    setFormData({
-                                      ...formData,
-                                      customerId: '',
-                                      customerName: '',
-                                      customerPhone: '',
-                                    });
-                                  }
-                                }}
-                                className="flex items-center justify-center px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                                title="Add new customer"
-                              >
-                                <Plus className="w-5 h-5" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
+{formData.isCredit && (
+  <div className="border-t-2 border-gray-200 pt-4">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+      {/* Left Column - Customer Selection */}
+      <div className="p-4 bg-orange-50 rounded-xl border-2 border-orange-200">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm sm:text-base font-bold text-gray-900">Customer Selection</h3>
+        </div>
+        
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 mb-2">Select Existing Customer</label>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              {/* Search Input */}
+              <input
+                type="text"
+                value={customerSearchTerm}
+                onChange={(e) => {
+                  setCustomerSearchTerm(e.target.value);
+                  if (e.target.value && formData.customerId) {
+                    setFormData({
+                      ...formData,
+                      customerId: '',
+                      customerName: '',
+                      customerPhone: '',
+                    });
+                  }
+                }}
+                placeholder={formData.customerId ? formData.customerName : "Search customers..."}
+                className="w-full px-3 py-2 sm:py-2.5 text-xs sm:text-sm border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white"
+              />
+              
+              {/* Dropdown Results */}
+              {customerSearchTerm && filteredCustomers.length > 0 && !formData.customerId && (
+                <div className="absolute z-10 w-full mt-1 bg-white border-2 border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                  {filteredCustomers.map(c => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => {
+                        setFormData({
+                          ...formData,
+                          customerId: c.id,
+                          customerName: c.name,
+                          customerPhone: c.phone,
+                        });
+                        setCustomerSearchTerm(c.name);
+                      }}
+                      className="w-full px-3 py-2 text-left text-xs sm:text-sm hover:bg-orange-50 transition-colors border-b border-gray-100 last:border-b-0"
+                    >
+                      <div className="font-medium text-gray-900">{c.name}</div>
+                      <div className="text-gray-600">{c.phone}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              
+              {/* No results message */}
+              {customerSearchTerm && filteredCustomers.length === 0 && !formData.customerId && (
+                <div className="absolute z-10 w-full mt-1 bg-white border-2 border-gray-200 rounded-lg shadow-lg px-3 py-2">
+                  <p className="text-xs text-gray-500">No customers found</p>
+                </div>
+              )}
+            </div>
+            
+            <button
+              type="button"
+              onClick={() => {
+                const isShowing = document.getElementById('new-customer-form')?.style.display !== 'none';
+                const form = document.getElementById('new-customer-form');
+                if (form) {
+                  form.style.display = isShowing ? 'none' : 'block';
+                }
+                if (!isShowing) {
+                  setFormData({
+                    ...formData,
+                    customerId: '',
+                    customerName: '',
+                    customerPhone: '',
+                  });
+                  setCustomerSearchTerm('');
+                }
+              }}
+              className="flex items-center justify-center px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              title="Add new customer"
+            >
+              <Plus className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      </div>
 
-                        {/* Right Column - New Customer Form */}
-                        <div id="new-customer-form" style={{ display: 'none' }} className="p-4 bg-orange-50 rounded-xl border-2 border-orange-200">
-                          <div className="flex items-center justify-between mb-3">
-                            <h3 className="text-sm sm:text-base font-bold text-gray-900">New Customer</h3>
-                          </div>
-                          
-                          <div className="space-y-3">
-                            <div>
-                              <label className="block text-xs font-semibold text-gray-700 mb-2">Customer Name *</label>
-                              <input
-                                type="text"
-                                value={formData.customerName}
-                                onChange={(e) => setFormData({ ...formData, customerName: e.target.value })}
-                                placeholder="Enter customer name"
-                                className="w-full px-3 py-2 sm:py-2.5 text-xs sm:text-sm border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                                required={formData.isCredit && !formData.customerId}
-                              />
-                            </div>
+      {/* Right Column - New Customer Form */}
+      <div id="new-customer-form" style={{ display: 'none' }} className="p-4 bg-orange-50 rounded-xl border-2 border-orange-200">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm sm:text-base font-bold text-gray-900">New Customer</h3>
+        </div>
+        
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-2">Customer Name *</label>
+            <input
+              type="text"
+              value={formData.customerName}
+              onChange={(e) => setFormData({ ...formData, customerName: e.target.value })}
+              placeholder="Enter customer name"
+              className="w-full px-3 py-2 sm:py-2.5 text-xs sm:text-sm border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+              required={formData.isCredit && !formData.customerId}
+            />
+          </div>
 
-                            <div>
-                              <label className="block text-xs font-semibold text-gray-700 mb-2">Phone Number</label>
-                              <input
-                                type="tel"
-                                value={formData.customerPhone}
-                                onChange={(e) => setFormData({ ...formData, customerPhone: e.target.value })}
-                                placeholder="Enter phone number"
-                                className="w-full px-3 py-2 sm:py-2.5 text-xs sm:text-sm border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-2">Phone Number</label>
+            <input
+              type="tel"
+              value={formData.customerPhone}
+              onChange={(e) => setFormData({ ...formData, customerPhone: e.target.value })}
+              placeholder="Enter phone number"
+              className="w-full px-3 py-2 sm:py-2.5 text-xs sm:text-sm border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
 
                   {/* Items Section */}
                   <div className="border-t-2 border-gray-200 pt-4 sm:pt-6">

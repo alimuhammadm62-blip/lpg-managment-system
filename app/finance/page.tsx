@@ -323,24 +323,6 @@ setExpenseForm({
                         required
                       />
                     </div>
-<div>
-  <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
-  <select
-    value={expenseForm.category}
-    onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value })}
-    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-    required
-  >
-    <option value="">Select category</option>
-    <option value="Food">Food</option>
-    <option value="Transport">Transport</option>
-    <option value="Shopping">Shopping</option>
-    <option value="Bills">Bills</option>
-    <option value="Entertainment">Entertainment</option>
-    <option value="Healthcare">Healthcare</option>
-    <option value="Other">Other</option>
-  </select>
-</div>
 
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1">From Account</label>

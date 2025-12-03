@@ -10,7 +10,7 @@ const navItems = [
   { href: '/inventory', label: 'Inventory', icon: Package },
   { href: '/purchase', label: 'Purchase', icon: ShoppingCart },
   { href: '/sale', label: 'Sale', icon: DollarSign },
-  { href: '/credit', label: 'Credit/Udhaar', icon: CreditCard },
+  { href: '/credit', label: 'Credit', icon: CreditCard },
   { href: '/finance', label: 'Finance', icon: Wallet },
 ];
 
