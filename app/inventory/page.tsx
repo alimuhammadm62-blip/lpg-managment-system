@@ -23,6 +23,9 @@ import {
   subMonths
 } from 'date-fns';
 
+import { safeGetArray } from '@/lib/storage';
+
+
 // Extended SaleItem type to match sales page
 type ExtendedSaleItem = SaleItem & {
   itemType: string;
@@ -56,8 +59,8 @@ export default function InventoryPage() {
   // --- Data Loading ---
   useEffect(() => {
     loadInventory();
-    const loadedPurchases = storage.get(STORAGE_KEYS.PURCHASES) || [];
-    const loadedSales = storage.get(STORAGE_KEYS.SALES) || [];
+    const loadedPurchases = safeGetArray<PurchaseItem>(STORAGE_KEYS.PURCHASES);
+    const loadedSales = safeGetArray<SaleItem>(STORAGE_KEYS.SALES);
     setPurchases(loadedPurchases);
     setSales(loadedSales);
   }, []);
