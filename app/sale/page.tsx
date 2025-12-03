@@ -1013,7 +1013,7 @@ export default function SalePage() {
                   <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Qty</th>
                   <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Price/Unit</th>
                   <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Total</th>
-                  <th className="px-3 sm:px-6 py-3 sm:py-4 text-center text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Type</th>
+                  <th className="px-3 sm:px-6 py-3 sm:py-4 text-center text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">STATUS</th>
                   <th className="px-3 sm:px-6 py-3 sm:py-4 text-center text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
