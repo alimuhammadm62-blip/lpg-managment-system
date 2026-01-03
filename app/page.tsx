@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { CreditCard, ShoppingCart, TrendingUp, DollarSign, Percent, Wallet, PieChart, AlertTriangle, CheckCircle, Printer, Download } from 'lucide-react';
 import { storage, STORAGE_KEYS } from '@/lib/storage';
 import type { DashboardStats, SaleItem, Transaction, CreditTransaction, PurchaseItem } from '@/lib/types';
 import { format, subDays, isWithinInterval } from 'date-fns';
@@ -132,11 +133,11 @@ export default function Dashboard() {
         </div>
         <div className="flex gap-3">
           <button className="flex items-center justify-center rounded-lg h-10 px-4 bg-white text-slate-700 text-sm font-bold hover:bg-slate-50 transition border border-slate-200 shadow-sm">
-            <span className="material-symbols-outlined mr-2 text-[18px]">print</span>
+            <Printer className="w-4 h-4 mr-2" />
             <span>Print</span>
           </button>
           <button className="flex items-center justify-center rounded-lg h-10 px-4 bg-white text-slate-700 text-sm font-bold hover:bg-slate-50 transition border border-slate-200 shadow-sm">
-            <span className="material-symbols-outlined mr-2 text-[18px]">download</span>
+            <Download className="w-4 h-4 mr-2" />
             <span>Export Report</span>
           </button>
         </div>
@@ -144,7 +145,7 @@ export default function Dashboard() {
 
       {stats.overdueCredits > 0 && (
         <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-lg mb-6 flex items-center">
-          <span className="material-symbols-outlined text-red-500 mr-2">warning</span>
+          <AlertTriangle className="w-5 h-5 text-red-500 mr-2" />
           <p className="text-red-700 font-medium">
             Alert: {stats.overdueCredits} customer(s) have overdue payments
           </p>
@@ -155,7 +156,7 @@ export default function Dashboard() {
         <div className="flex flex-col gap-2 rounded-xl p-5 bg-white border border-slate-200 shadow-sm">
           <div className="flex justify-between items-start">
             <p className="text-[#64748b] text-sm font-medium uppercase tracking-wider">Pending Credits</p>
-            <span className="material-symbols-outlined text-[#64748b] text-[20px]">credit_card</span>
+            <CreditCard className="w-5 h-5 text-[#64748b]" />
           </div>
           <div className="flex items-end gap-3 mt-1">
             <p className="text-slate-900 text-2xl font-bold leading-tight">Rs {stats.pendingCredits.toLocaleString('en-PK', { maximumFractionDigits: 0 })}</p>
@@ -165,7 +166,7 @@ export default function Dashboard() {
         <div className="flex flex-col gap-2 rounded-xl p-5 bg-white border border-slate-200 shadow-sm">
           <div className="flex justify-between items-start">
             <p className="text-[#64748b] text-sm font-medium uppercase tracking-wider">Gross Sale</p>
-            <span className="material-symbols-outlined text-[#64748b] text-[20px]">point_of_sale</span>
+            <ShoppingCart className="w-5 h-5 text-[#64748b]" />
           </div>
           <div className="flex items-end gap-3 mt-1">
             <p className="text-slate-900 text-2xl font-bold leading-tight">Rs {stats.netSales.toLocaleString('en-PK', { maximumFractionDigits: 0 })}</p>
@@ -175,7 +176,7 @@ export default function Dashboard() {
         <div className="flex flex-col gap-2 rounded-xl p-5 bg-white border border-slate-200 shadow-sm">
           <div className="flex justify-between items-start">
             <p className="text-[#64748b] text-sm font-medium uppercase tracking-wider">Gross Profit</p>
-            <span className="material-symbols-outlined text-[#64748b] text-[20px]">trending_up</span>
+            <TrendingUp className="w-5 h-5 text-[#64748b]" />
           </div>
           <div className="flex items-end gap-3 mt-1">
             <p className="text-slate-900 text-2xl font-bold leading-tight">Rs {stats.grossProfit.toLocaleString('en-PK', { maximumFractionDigits: 0 })}</p>
@@ -186,7 +187,7 @@ export default function Dashboard() {
           <div className="absolute right-0 top-0 w-24 h-24 bg-[#19a1e6]/5 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110"></div>
           <div className="flex justify-between items-start relative z-10">
             <p className="text-[#64748b] text-sm font-medium uppercase tracking-wider">Gross Margin</p>
-            <span className="material-symbols-outlined text-[#64748b] text-[20px]">percent</span>
+            <Percent className="w-5 h-5 text-[#64748b]" />
           </div>
           <div className="flex items-end gap-3 mt-1 relative z-10">
             <p className="text-slate-900 text-2xl font-bold leading-tight">{grossMargin.toFixed(1)}%</p>
@@ -198,7 +199,7 @@ export default function Dashboard() {
         <div className="flex flex-col gap-2 rounded-xl p-5 bg-white border border-slate-200 shadow-sm">
           <div className="flex justify-between items-start">
             <p className="text-[#64748b] text-sm font-medium uppercase tracking-wider">Gross Cost</p>
-            <span className="material-symbols-outlined text-[#64748b] text-[20px]">payments</span>
+            <DollarSign className="w-5 h-5 text-[#64748b]" />
           </div>
           <div className="flex items-end gap-3 mt-1">
             <p className="text-slate-900 text-2xl font-bold leading-tight">Rs {(stats.netSales - stats.grossProfit).toLocaleString('en-PK', { maximumFractionDigits: 0 })}</p>
@@ -208,7 +209,7 @@ export default function Dashboard() {
         <div className="flex flex-col gap-2 rounded-xl p-5 bg-white border border-slate-200 shadow-sm">
           <div className="flex justify-between items-start">
             <p className="text-[#64748b] text-sm font-medium uppercase tracking-wider">Total Expenses</p>
-            <span className="material-symbols-outlined text-[#64748b] text-[20px]">attach_money</span>
+            <DollarSign className="w-5 h-5 text-[#64748b]" />
           </div>
           <div className="flex items-end gap-3 mt-1">
             <p className="text-slate-900 text-2xl font-bold leading-tight">Rs {stats.totalExpense.toLocaleString('en-PK', { maximumFractionDigits: 0 })}</p>
@@ -218,7 +219,7 @@ export default function Dashboard() {
         <div className="flex flex-col gap-2 rounded-xl p-5 bg-white border border-slate-200 shadow-sm">
           <div className="flex justify-between items-start">
             <p className="text-[#64748b] text-sm font-medium uppercase tracking-wider">Net Profit / Loss</p>
-            <span className="material-symbols-outlined text-[#19a1e6] text-[20px]">account_balance_wallet</span>
+            <Wallet className="w-5 h-5 text-[#19a1e6]" />
           </div>
           <div className="flex items-end gap-3 mt-1">
             <p className={`text-2xl font-bold leading-tight ${stats.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -231,7 +232,7 @@ export default function Dashboard() {
           <div className="absolute right-0 top-0 w-24 h-24 bg-[#0bda57]/5 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110"></div>
           <div className="flex justify-between items-start relative z-10">
             <p className="text-[#64748b] text-sm font-medium uppercase tracking-wider">Net Margin</p>
-            <span className="material-symbols-outlined text-[#64748b] text-[20px]">pie_chart</span>
+            <PieChart className="w-5 h-5 text-[#64748b]" />
           </div>
           <div className="flex items-end gap-3 mt-1 relative z-10">
             <p className="text-slate-900 text-2xl font-bold leading-tight">{netMargin.toFixed(1)}%</p>
@@ -251,7 +252,9 @@ export default function Dashboard() {
             <div 
               className="w-48 h-48 rounded-full bg-slate-50 relative flex items-center justify-center shadow-lg" 
               style={{ 
-                background: `conic-gradient(#fb923c 0% ${shopExpensePercentage}%, #a855f7 ${shopExpensePercentage}% 100%)` 
+                background: stats.totalExpense > 0 
+                  ? `conic-gradient(#fb923c 0% ${shopExpensePercentage}%, #a855f7 ${shopExpensePercentage}% 100%)` 
+                  : '#e2e8f0'
               }}
             >
               <div className="w-36 h-36 bg-white rounded-full flex flex-col items-center justify-center z-10 shadow-inner">
@@ -281,7 +284,7 @@ export default function Dashboard() {
         <div className="rounded-xl bg-white border border-slate-200 p-6 shadow-sm flex flex-col gap-6 min-h-[420px]">
           <div className="flex justify-between items-start">
             <h3 className="text-slate-900 text-lg font-bold flex items-center gap-2">
-              <span className="material-symbols-outlined text-[#fa5f38]">warning</span>
+              <AlertTriangle className="w-5 h-5 text-[#fa5f38]" />
               Overdue Payments
             </h3>
           </div>
@@ -292,7 +295,7 @@ export default function Dashboard() {
             </div>
             {stats.overdueCredits > 0 && (
               <div className="flex items-center gap-1 text-[#fa5f38] bg-[#fa5f38]/10 px-2 py-1 rounded text-xs font-bold">
-                <span className="material-symbols-outlined text-[14px]">priority_high</span>
+                <AlertTriangle className="w-3 h-3" />
                 Action Needed
               </div>
             )}
@@ -319,7 +322,7 @@ export default function Dashboard() {
               ))
             ) : (
               <div className="text-center py-8 text-[#64748b]">
-                <span className="material-symbols-outlined text-4xl mb-2">check_circle</span>
+                <CheckCircle className="w-12 h-12 mx-auto mb-2" />
                 <p className="text-sm">No overdue payments</p>
               </div>
             )}
